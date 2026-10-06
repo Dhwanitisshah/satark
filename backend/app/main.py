@@ -25,6 +25,14 @@ MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_TEXT_CHARS = 5000
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 
+
+def debug_enabled() -> bool:
+    """SATARK_DEBUG=true adds `ai_timing` and `ai_attempts` (per-call milliseconds, HTTP statuses of failed provider
+    calls) to /api/check responses. Off by default: that is operational detail, not something a public response
+    should carry. The same facts are always written to the server log, whatever this flag says."""
+    return os.getenv("SATARK_DEBUG", "false").lower() in {"1", "true", "yes"}
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # One long-lived HTTP client (keep-alive, so TLS connections are reused) plus a warm-up request to each
@@ -109,8 +117,11 @@ async def check(
         raise HTTPException(503, "Couldn't read that screenshot right now. Try again, or paste the message text.")
 
     out = fuse(text, rules, judgement, ai_error, lang)
-    if ai_attempts:  # one entry per failed attempt: provider, model, reason, HTTP status or error name, milliseconds
-        out["ai_attempts"] = ai_attempts
+    if debug_enabled():
+        if ai_attempts:  # one entry per failed attempt: provider, model, reason, HTTP status or error name, ms
+            out["ai_attempts"] = ai_attempts
+    else:
+        out.pop("ai_timing", None)   # the public response keeps ai_provider and ai_error, nothing finer
     return out
 
 

@@ -898,45 +898,84 @@ def test_api_reports_which_provider_answered(monkeypatch):
     assert body["ai_provider"] == "groq"
 
 
-def test_api_exposes_the_timing_of_the_call_that_answered(monkeypatch):
-    timing = {"provider": "groq", "model": "m", "connect_ms": 40, "tls_ms": 90, "ttfb_ms": 700, "total_ms": 900,
-              "reused": False, "completion_tokens": 219}
+TIMING = {"provider": "groq", "model": "m", "connect_ms": 40, "tls_ms": 90, "ttfb_ms": 700, "total_ms": 900,
+          "reused": False, "completion_tokens": 219}
+ATTEMPTS = [{"provider": "groq", "model": "m", "reason": "unavailable", "status": 403, "took_ms": 120},
+            {"provider": "gemini", "model": "g", "reason": "unavailable", "status": 503, "took_ms": 6500}]
 
+
+@pytest.fixture
+def answering(monkeypatch):
     async def ok(*args, **kwargs):
-        return {**GOOD, "provider": "groq", "timing": timing}
+        return {**GOOD, "provider": "groq", "timing": dict(TIMING)}
 
     monkeypatch.setattr(llm, "analyse", ok)
-    body = TestClient(app).post("/api/check", data={"text": MESSAGE}).json()
-    assert body["ai_timing"] == timing
 
 
-def test_api_reports_each_failed_attempt_when_the_ai_is_unavailable(monkeypatch):
-    attempts = [{"provider": "groq", "model": "m", "reason": "unavailable", "status": 403, "took_ms": 120},
-                {"provider": "gemini", "model": "g", "reason": "unavailable", "status": 503, "took_ms": 6500}]
-
-    async def failing(*args, **kwargs):
+@pytest.fixture
+def failing(monkeypatch):
+    async def fail(*args, **kwargs):
         err = llm.LLMError("unavailable", 403, 120)
-        err.attempts = attempts
+        err.attempts = list(ATTEMPTS)
         raise err
 
-    monkeypatch.setattr(llm, "analyse", failing)
-    body = TestClient(app).post("/api/check", data={"text": MESSAGE + " http://sbi-kyc.xyz"}).json()
-    assert body["ai_error"] == "unavailable" and body["ai_attempts"] == attempts
-    assert body["verdict"] == "scam"                       # the rules still answered
+    monkeypatch.setattr(llm, "analyse", fail)
 
 
-def test_api_has_no_attempts_when_ai_worked_or_was_not_asked(monkeypatch):
-    async def ok(*args, **kwargs):
-        return dict(GOOD)
-
-    monkeypatch.setattr(llm, "analyse", ok)
-    assert "ai_attempts" not in TestClient(app).post("/api/check", data={"text": MESSAGE}).json()
-    assert "ai_attempts" not in TestClient(app).post("/api/check", data={"text": MESSAGE, "ai": "false"}).json()
+def check(**data):
+    return TestClient(app).post("/api/check", data={"text": MESSAGE + " http://sbi-kyc.xyz", **data}).json()
 
 
-def test_api_ai_timing_is_null_without_ai():
-    body = TestClient(app).post("/api/check", data={"text": "Are we meeting at 8?"}).json()
-    assert body["ai_timing"] is None
+def test_public_responses_carry_no_timing_or_provider_error_details_by_default(answering):
+    body = check()
+    assert "ai_timing" not in body and "ai_attempts" not in body
+    assert body["ai_provider"] == "groq" and body["ai_error"] is None      # the coarse facts stay public
+
+
+def test_a_failed_ai_exposes_only_the_category_by_default(failing):
+    body = check()
+    assert body["ai_error"] == "unavailable" and body["ai_provider"] is None
+    assert "ai_attempts" not in body and "ai_timing" not in body
+    assert "403" not in str(body) and "503" not in str(body) and "gemini" not in str(body)   # no status codes, no vendor
+    assert body["verdict"] == "scam"                                          # the rules still answered
+
+
+def test_the_failure_details_are_always_in_the_server_log_even_when_the_response_hides_them(wire, caplog):
+    wire(lambda r: httpx.Response(401))
+    with caplog.at_level(logging.WARNING, logger="satark.llm"):
+        failure_reason()
+    assert "status=401" in caplog.text and "LLM gave no answer after 1 attempt(s)" in caplog.text
+    assert "took=" in caplog.text and KEY not in caplog.text and "SBI" not in caplog.text
+
+
+@pytest.mark.parametrize("value", ["true", "1", "yes", "True"])
+def test_debug_flag_adds_timing_to_the_response(answering, monkeypatch, value):
+    monkeypatch.setenv("SATARK_DEBUG", value)
+    assert check()["ai_timing"] == TIMING
+
+
+def test_debug_flag_adds_the_failed_attempts(failing, monkeypatch):
+    monkeypatch.setenv("SATARK_DEBUG", "true")
+    body = check()
+    assert body["ai_error"] == "unavailable" and body["ai_attempts"] == ATTEMPTS and body["ai_timing"] is None
+
+
+@pytest.mark.parametrize("value", ["false", "0", "no", "", "debug", "on"])
+def test_only_clear_yes_values_turn_debug_on(answering, monkeypatch, value):
+    monkeypatch.setenv("SATARK_DEBUG", value)
+    assert "ai_timing" not in check()
+
+
+def test_debug_without_any_failure_has_no_attempts_and_no_ai_gives_null_timing(answering, monkeypatch):
+    monkeypatch.setenv("SATARK_DEBUG", "true")
+    assert "ai_attempts" not in check()
+    assert "ai_attempts" not in check(ai="false")
+    assert check(ai="false")["ai_timing"] is None
+
+
+def test_the_unrelated_DEBUG_variable_does_not_switch_it_on(answering, monkeypatch):
+    monkeypatch.setenv("DEBUG", "1")        # many tools set a plain DEBUG; only SATARK_DEBUG counts here
+    assert "ai_timing" not in check()
 
 
 def test_api_ai_provider_is_null_without_ai():

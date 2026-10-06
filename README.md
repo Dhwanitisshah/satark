@@ -175,11 +175,14 @@ Response (trimmed):
 `"unavailable"` or `"bad_response"`; the UI then shows "AI unavailable, rules-only result". A screenshot that can't
 be read returns a friendly 503 rather than a false "no scam signs".
 
-Two more fields help when something is slow or down. `ai_timing` says how the answering call went (connect, TLS and
+Two more fields help when something is slow or down, but they are **debug-only**: they appear in the response only
+when the server runs with `SATARK_DEBUG=true`. `ai_timing` says how the answering call went (connect, TLS and
 first-byte milliseconds, whether the connection was reused, token counts, `cached: true` for a repeat). When the AI
 fails, `ai_attempts` lists each failed attempt with its provider, model, HTTP status (or error name such as
 `timeout`) and duration, for example `401` for a rejected API key or `429` for a rate limit. Neither contains a key or
-any message text.
+any message text. A normal response keeps only `ai_provider` and the coarse `ai_error`. The same details are
+**always** written to the server log (`LLM call ok`, `LLM call failed`, `LLM gave no answer after N attempt(s)`),
+whether or not the flag is set.
 
 `GET /api/health` reports whether the LLM, vision, fallback and OCR are available.
 
@@ -205,6 +208,7 @@ Environment variables (values are in `.env.example`; **never commit real keys**)
 | `LLM_TOTAL_TIMEOUT`, `LLM_TOTAL_TIMEOUT_VISION` | cap on all AI work per request, in seconds (text check / screenshot-only) |
 | `LLM_PRIMARY_TIMEOUT` | most the primary may use while a fallback is waiting (default 7s); the fallback gets the rest of the cap |
 | `LLM_TIMEOUT`, `LLM_MAX_TOKENS` | optional: per-call timeout and reply budget |
+| `SATARK_DEBUG` | optional, off by default: `true` adds `ai_timing` / `ai_attempts` to API responses (a plain `DEBUG` is ignored) |
 | `CORS_ORIGINS` | allowed origins (`*` by default) |
 
 The free tier sleeps after about 15 minutes without traffic and takes up to a minute to wake. The page pings
