@@ -153,8 +153,73 @@ def test_token_budget_leaves_room_for_thinking_models(wire, monkeypatch):
     run_analyse()
     assert json.loads(calls[0].content)["max_tokens"] >= 2048
     monkeypatch.setenv("LLM_MAX_TOKENS", "4096")
-    run_analyse()
+    asyncio.run(llm.analyse(MESSAGE + " (second message, not cached)", "en", []))
     assert json.loads(calls[1].content)["max_tokens"] == 4096
+
+
+# --- cache -----------------------------------------------------------------------------------
+
+def ask(text=MESSAGE, lang="en", image=None):
+    return asyncio.run(llm.analyse(text, lang, [], image))
+
+
+def test_repeat_check_is_served_from_cache(wire):
+    calls, _ = wire(lambda r: chat(json.dumps(GOOD)))
+    first, second = ask(), ask()
+    assert first == second and len(calls) == 1
+
+
+def test_cache_is_keyed_on_text_lang_and_model(wire, monkeypatch):
+    calls, _ = wire(lambda r: chat(json.dumps(GOOD)))
+    ask()
+    ask(text=MESSAGE + " please")        # different text
+    ask(lang="hi")                       # different language
+    monkeypatch.setenv("LLM_MODEL", "other-model")
+    ask()                                # different model
+    assert len(calls) == 4
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    ask(), ask(lang="hi")                # back on the first model, both are still cached
+    assert len(calls) == 4
+
+
+def test_different_screenshots_do_not_share_an_entry(wire, monkeypatch):
+    monkeypatch.setenv("LLM_VISION", "true")
+    calls, _ = wire(lambda r: chat(json.dumps(GOOD)))
+    ask(text="", image=b"image-one")
+    ask(text="", image=b"image-two")
+    ask(text="", image=b"image-one")
+    assert len(calls) == 2
+
+
+def test_failures_are_not_cached(wire):
+    replies = iter([httpx.Response(429), chat(json.dumps(GOOD))])
+    calls, _ = wire(lambda r: next(replies))
+    assert failure_reason() == "rate_limited"
+    assert ask()["risk"] == 80
+    assert len(calls) == 2
+
+
+def test_cache_returns_independent_copies(wire):
+    wire(lambda r: chat(json.dumps(GOOD)))
+    ask()["red_flags"].clear()
+    assert ask()["red_flags"] != []
+
+
+def test_cache_evicts_least_recently_used(wire, monkeypatch):
+    monkeypatch.setattr(llm, "CACHE_SIZE", 2)
+    calls, _ = wire(lambda r: chat(json.dumps(GOOD)))
+    ask("one"), ask("two")
+    ask("one")                           # touch "one": "two" is now the oldest
+    ask("three")                         # evicts "two"
+    assert len(calls) == 3
+    ask("one")                           # still cached
+    assert len(calls) == 3
+    ask("two")                           # was evicted, so it calls out again
+    assert len(calls) == 4
+
+
+def test_default_cache_size_is_256():
+    assert llm.CACHE_SIZE == 256
 
 
 # --- fallback model --------------------------------------------------------------------------

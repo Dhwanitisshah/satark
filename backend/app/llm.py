@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
+import hashlib
 import json
 import logging
 import os
 import re
+from collections import OrderedDict
 from urllib.parse import urlparse
 
 import httpx
@@ -63,6 +66,23 @@ def is_configured() -> bool:
 
 def vision_enabled() -> bool:
     return os.getenv("LLM_VISION", "false").lower() in {"1", "true", "yes"}
+
+
+# In-memory LRU of successful judgements, so re-checking the same message (demo re-runs, a family
+# forwarding the same scam) is instant and costs no quota. Not persisted: it dies with the process.
+CACHE_SIZE = 256
+_cache: OrderedDict[tuple[str, str, str], dict] = OrderedDict()
+
+
+def clear_cache() -> None:
+    _cache.clear()
+
+
+def _cache_key(text: str, lang: str, model: str, image: bytes | None) -> tuple[str, str, str]:
+    digest = hashlib.sha256(text.encode("utf-8"))
+    if image is not None:  # two different screenshots with no text must not share an entry
+        digest.update(b"\0image\0" + image)
+    return digest.hexdigest(), lang, model
 
 
 def _client() -> httpx.AsyncClient:
@@ -161,6 +181,11 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
     if not is_configured():
         return None
 
+    key = _cache_key(text, lang, os.environ["LLM_MODEL"], image if vision_enabled() else None)
+    if key in _cache:
+        _cache.move_to_end(key)
+        return copy.deepcopy(_cache[key])
+
     hints = ", ".join(h["label"] for h in rule_hints) or "none"
     user_text = (
         f"Explanation language: {LANG_NAMES.get(lang, 'English')}.\n"
@@ -209,8 +234,13 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
         raise first_error  # the primary model's failure is the one worth reporting
 
     try:
-        return await asyncio.wait_for(run(), timeout=_total_timeout())
+        result = await asyncio.wait_for(run(), timeout=_total_timeout())
     except asyncio.TimeoutError:
         log.warning("LLM call failed: provider=%s model=%s status=- error=total_timeout limit=%ss",
                     urlparse(base).netloc or "unknown", models[0], _total_timeout())
         raise LLMError("unavailable") from None
+
+    _cache[key] = copy.deepcopy(result)  # failures are never cached
+    while len(_cache) > CACHE_SIZE:
+        _cache.popitem(last=False)
+    return result
