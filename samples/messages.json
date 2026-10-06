@@ -366,5 +366,23 @@
     "label": "Genuine interview invite",
     "expected": "low",
     "text": "Hi Aman, this is Neha from Infosys HR. Your interview is scheduled for 10 Oct, 11 AM on Microsoft Teams. The link is in your email. Please keep your ID proof ready."
+  },
+  {
+    "id": "genuine-hinglish-warning",
+    "label": "Genuine bank warning (Hinglish)",
+    "expected": "low",
+    "text": "Sawdhan! Bank kabhi aapse OTP ya PIN nahi maangta. Apna OTP kisi ko mat batana, chahe wo bank wala ho."
+  },
+  {
+    "id": "genuine-hinglish-bijli",
+    "label": "Genuine electricity bill notice (Hinglish)",
+    "expected": "low",
+    "text": "Aapka bijli bill ₹1,240 generate ho gaya hai. Due date 18 Oct. Bhugtan MSEDCL ki official app par karein."
+  },
+  {
+    "id": "genuine-hinglish-friend",
+    "label": "Casual Hinglish chat with 'tonight' and 'now' words",
+    "expected": "low",
+    "text": "Bhai aaj raat ko call karta hu, abhi class mein hu. Mummy ko bol dena main late aaunga."
   }
 ]

@@ -32,6 +32,10 @@ SPECIFIC: dict[str, list[str]] = {
     ],
     "otp_request": ["Never share an OTP, UPI PIN, CVV or password, with anyone, for any reason."],
     "remote_access": ["Don't install AnyDesk, TeamViewer or similar. If you already did, uninstall it and call your bank."],
+    "job_fee": [
+        "Real employers never charge a deposit or fee for a job, a kit or an offer letter. Don't pay; check the company on its official website.",
+    ],
+    "advance_fee": ["Never pay a fee up front to receive a prize, loan or job. The payment is the scam."],
     "upi_receive": ["Decline the request. Entering your UPI PIN always SENDS money; it never receives it."],
     "upi_impersonation": ["Don't pay. Real fines and fees are paid on official .gov.in portals, never to personal UPI IDs."],
     "family_emergency": [
