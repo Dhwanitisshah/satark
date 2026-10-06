@@ -60,6 +60,212 @@
     "text": "Join our SEBI-registered VIP trading group! Guaranteed 30% returns every month. Limited seats, join now on WhatsApp: wa.me/919876543210"
   },
   {
+    "id": "otp-card-review",
+    "label": "Bank 'executive' asks for the OTP",
+    "expected": "scam",
+    "text": "SBI Security Team: Your debit card is under review. Please share the OTP sent to your mobile with our executive to avoid card suspension."
+  },
+  {
+    "id": "anydesk-refund",
+    "label": "Fake refund needs AnyDesk",
+    "expected": "scam",
+    "text": "Hello, this is Amazon customer care. Your refund of Rs 4,999 has failed. Please install AnyDesk from the Play Store and read out the 9-digit code to us so we can process it manually."
+  },
+  {
+    "id": "collect-request",
+    "label": "UPI collect request disguised as a payment",
+    "expected": "scam",
+    "text": "We are sending you Rs 2,000 as a goodwill gesture. Accept the collect request on your PhonePe app and the amount will reach your account."
+  },
+  {
+    "id": "kbc-lottery-fee",
+    "label": "KBC lucky draw with a processing fee",
+    "expected": "scam",
+    "text": "KBC Lucky Draw 2026: your mobile number has won Rs 25,00,000. To claim the prize, WhatsApp our manager on 9123456780 and pay the processing fee of Rs 12,500."
+  },
+  {
+    "id": "bijli-hinglish",
+    "label": "Electricity cut threat (Hinglish)",
+    "expected": "scam",
+    "text": "Priya ji, aapka bijli bill pending hai. Aaj raat 9:30 baje tak payment nahi kiya to aapka connection kat diya jayega. Abhi call karein 8765432109."
+  },
+  {
+    "id": "digital-arrest-hindi",
+    "label": "Digital arrest threat (Hindi, Devanagari)",
+    "expected": "scam",
+    "text": "आपके नाम से एक पार्सल पकड़ा गया है जिसमें ड्रग्स हैं। मैं मुंबई क्राइम ब्रांच से बोल रहा हूँ। आप डिजिटल अरेस्ट में हैं, वीडियो कॉल बंद न करें और किसी को न बताएं।"
+  },
+  {
+    "id": "kyc-hindi-shortlink",
+    "label": "KYC account-closure SMS (Hindi) with a short link",
+    "expected": "scam",
+    "text": "प्रिय ग्राहक, आपका SBI खाता बंद हो जाएगा। KYC अपडेट के लिए तुरंत इस लिंक पर क्लिक करें: https://bit.ly/sbi-kyc-9x"
+  },
+  {
+    "id": "task-hinglish",
+    "label": "Work-from-home video-liking job (Hinglish)",
+    "expected": "scam",
+    "text": "Namaste! Ghar baithe part time kaam, roz ₹2000-5000 kamayein. Sirf YouTube videos like karna hai. Telegram par judiye: t.me/earnwithsonia"
+  },
+  {
+    "id": "stock-tips-fee",
+    "label": "Stock tips group with a registration fee",
+    "expected": "scam",
+    "text": "Join our exclusive stock tips group. Our analyst gives assured 40% profit in 2 weeks. Seats are limited. Send ₹5,000 as registration and you will be added to the VIP group."
+  },
+  {
+    "id": "echallan-apk",
+    "label": "E-challan app download (.apk on a fake domain)",
+    "expected": "scam",
+    "text": "Your e-challan of Rs 1,000 for a traffic violation is pending. Download the Parivahan app to settle it: http://parivahan-echallan.top/echallan.apk"
+  },
+  {
+    "id": "netbanking-ip-link",
+    "label": "Netbanking 'verification' on a raw IP address",
+    "expected": "suspicious",
+    "text": "HDFC Bank: Dear user, your netbanking access will be deactivated. Verify your details here http://185.234.12.9/hdfc/login"
+  },
+  {
+    "id": "sim-kyc-shortlink",
+    "label": "SIM block over KYC, shortened link",
+    "expected": "scam",
+    "text": "Dear customer, your SIM will be blocked within 24 hours if KYC is not updated. Click here to update: https://rb.gy/x7k2p"
+  },
+  {
+    "id": "wa-recruiter-foreign",
+    "label": "Recruiter on a foreign WhatsApp number",
+    "expected": "scam",
+    "text": "Hi, I am Anjali from HR. We found your resume on Naukri. Message me on WhatsApp +84 912 345 678 for a work from home opportunity with weekly payouts."
+  },
+  {
+    "id": "olx-buyer-pin",
+    "label": "OLX buyer who wants your UPI PIN",
+    "expected": "scam",
+    "text": "Hi, I am interested in your sofa on OLX. I will pay an advance of Rs 3,000. Approve the request I sent and enter your UPI PIN to receive the advance."
+  },
+  {
+    "id": "police-station-nephew",
+    "label": "'Your nephew is at the police station'",
+    "expected": "scam",
+    "text": "Hello uncle, I am Karan, Rohit's friend. Rohit is at the police station after an accident and they need ₹20,000 sent to karan.s88@paytm right away. Please do not call his father."
+  },
+  {
+    "id": "irctc-refund-link",
+    "label": "Fake IRCTC refund page",
+    "expected": "scam",
+    "text": "IRCTC: a refund of Rs 1,245 for your cancelled ticket is pending. Update your bank details at http://irctc-refund.xyz to receive the money."
+  },
+  {
+    "id": "itr-refund-link",
+    "label": "Fake income-tax refund page",
+    "expected": "scam",
+    "text": "Income Tax Department: you are eligible for a refund of ₹15,490. Submit your account details to receive it: https://incometax-refund.cc/claim"
+  },
+  {
+    "id": "electricity-marathi",
+    "label": "Electricity cut threat (Marathi, Devanagari)",
+    "expected": "scam",
+    "text": "तुमचे वीज बिल थकले आहे. आज रात्री ९:३० वाजता तुमचे वीज कनेक्शन कापले जाईल. ताबडतोब 9876501234 वर संपर्क करा."
+  },
+  {
+    "id": "family-hindi-new-number",
+    "label": "'New number' family emergency (Hindi, Devanagari)",
+    "expected": "scam",
+    "text": "पापा, मेरा फोन खराब हो गया है, ये मेरा नया नंबर है। मैं अस्पताल में हूँ, अभी ₹20,000 भेजो और मम्मी को मत बताना।"
+  },
+  {
+    "id": "digital-arrest-hinglish",
+    "label": "Fake CBI officer (Hinglish)",
+    "expected": "scam",
+    "text": "Sir main CBI officer bol raha hoon. Aapke Aadhaar se money laundering ka case register hua hai. Aap digital arrest mein ho, kisi ko mat batana aur video call chalu rakhna."
+  },
+  {
+    "id": "otp-hinglish",
+    "label": "Card block, 'OTP bata dijiye' (Hinglish)",
+    "expected": "scam",
+    "text": "Sir aapka SBI card band ho jayega. Abhi jo OTP aaya hai wo bata dijiye, hum verify kar rahe hain."
+  },
+  {
+    "id": "inaam-hinglish",
+    "label": "Prize money with a fee (Hinglish)",
+    "expected": "scam",
+    "text": "Badhai ho! Aapne ₹10 lakh ka inaam jeeta hai. Paisa lene ke liye pehle ₹5000 fees bhejein, number: 9988776655."
+  },
+  {
+    "id": "apk-bijli-hinglish",
+    "label": "Electricity bill app as an .apk (Hinglish)",
+    "expected": "scam",
+    "text": "Aapka bijli bill update karne ke liye ye app install karein: MSEDCL_Bill.apk"
+  },
+  {
+    "id": "bluedart-redelivery",
+    "label": "Courier re-delivery fee on a fake domain",
+    "expected": "scam",
+    "text": "BlueDart: your parcel was returned to the depot. Reschedule delivery and pay a Rs 25 redelivery fee: http://bluedart-track.top/pay"
+  },
+  {
+    "id": "job-deposit",
+    "label": "Shortlisted, now pay a deposit",
+    "expected": "scam",
+    "text": "Congratulations! Your resume is shortlisted at Infosys. Pay a security deposit of Rs 3,000 to confirm your offer letter."
+  },
+  {
+    "id": "blind-romance-giftcard",
+    "label": "Romance scam: gift card from a stranded 'partner'",
+    "expected": "scam",
+    "rules_blind": true,
+    "text": "Hey love, I'm stuck at Dubai airport and my bank app isn't working. Can you buy a 100 dollar Google Play gift card and message me the code? I'll make it up to you when I land, I promise."
+  },
+  {
+    "id": "blind-recruiter-kit",
+    "label": "Fake recruiter: 'training kit' cost",
+    "expected": "scam",
+    "rules_blind": true,
+    "text": "Hi Aman, this is Neha from TalentBridge. Your profile fits our remote data-entry role. Before onboarding we ship a laptop and a training kit to your home. The kit cost of 2,100 is cleared through the link in your email, and it's returned with your first salary. Reply YES to begin."
+  },
+  {
+    "id": "blind-wrong-number-coin",
+    "label": "'Wrong number' chat that pivots to a coin platform",
+    "expected": "scam",
+    "rules_blind": true,
+    "text": "Sorry, wrong number! Didn't mean to disturb you. You seem like a kind person though, I'm Mei. I've been doing really well with a new coin platform my uncle showed me. Want me to show you how it works? Totally no pressure."
+  },
+  {
+    "id": "blind-college-dues",
+    "label": "Fake college dues message to a parent",
+    "expected": "scam",
+    "rules_blind": true,
+    "text": "Dear Parent, your ward's hostel seat for Semester 2 will be cancelled if the pending dues aren't cleared by Friday 5 PM. Kindly settle through the account details shared earlier by the accounts office (Mr. Deshmukh) on WhatsApp."
+  },
+  {
+    "id": "blind-voice-clone-mama",
+    "label": "Voice-clone style 'it's me, mama' text, no amount",
+    "expected": "scam",
+    "rules_blind": true,
+    "text": "Mama it's me. I'm in big trouble, please don't call, my voice is gone from crying. I'm with some people who say I have to do what they tell me or they won't let me leave. Please do exactly what the number I'm messaging from tells you."
+  },
+  {
+    "id": "blind-picks-community",
+    "label": "'Community' that posts picks rising 8-10% a week",
+    "expected": "scam",
+    "rules_blind": true,
+    "text": "You've been added to the Dalal Street Wizards community. Every morning our team posts 3 picks that have been rising 8-10% weekly. Open the pinned message for access and see the member results."
+  },
+  {
+    "id": "blind-loan-app-threat",
+    "label": "Loan-app harassment threat",
+    "expected": "scam",
+    "rules_blind": true,
+    "text": "Your instant-loan installment is 6 days late. We have your contact list and gallery. If it isn't cleared by evening, every number saved on your phone will get your photo with the word 'defaulter' on it."
+  },
+  {
+    "id": "blind-scheme-beneficiary",
+    "label": "Fake government scheme 'beneficiary list'",
+    "expected": "scam",
+    "rules_blind": true,
+    "text": "Ladli Yojana: women with an Aadhaar-linked bank account get a monthly benefit. Your name is on the beneficiary list. To see your status and release date, log in at https://ladli-yojana-status.com"
+  },
+  {
     "id": "bank-otp",
     "label": "Genuine bank OTP alert",
     "expected": "low",
@@ -82,5 +288,83 @@
     "label": "Genuine bank fraud warning",
     "expected": "low",
     "text": "SBI never asks for your OTP, PIN or password. Never share these with anyone, and do not install screen sharing apps like AnyDesk on a stranger's request."
+  },
+  {
+    "id": "genuine-sbi-otp",
+    "label": "Genuine SBI online-transaction OTP",
+    "expected": "low",
+    "text": "Dear Customer, OTP for your SBI online transaction of Rs 1,250.00 is 718203. Valid for 10 minutes. Never share your OTP with anyone. -SBI"
+  },
+  {
+    "id": "genuine-upi-credit",
+    "label": "Genuine UPI credit alert",
+    "expected": "low",
+    "text": "Rs 5,000.00 credited to your a/c XX4567 on 06-Oct-26 by UPI Ref No 628391047112. -HDFC Bank"
+  },
+  {
+    "id": "genuine-upi-debit",
+    "label": "Genuine UPI debit alert",
+    "expected": "low",
+    "text": "Rs 349.00 debited from A/c XX4567 on 06-10-26 and credited to swiggy@icici via UPI. Ref 628391047113. If this wasn't you, call 1800 1234 immediately. -SBI"
+  },
+  {
+    "id": "genuine-delivery-otp",
+    "label": "Genuine delivery: 'share this OTP with the agent'",
+    "expected": "low",
+    "text": "Your Flipkart order OD4321 is out for delivery today. Share OTP 4829 with the delivery agent only when you receive the package. Track: https://www.flipkart.com/orders"
+  },
+  {
+    "id": "genuine-exam-timetable",
+    "label": "Genuine college exam notice",
+    "expected": "low",
+    "text": "Dear students, the Semester 3 exam timetable is now available on the college portal https://erp.vit.ac.in. Hall tickets will be issued from 10 Oct. - Exam Cell"
+  },
+  {
+    "id": "genuine-fee-reminder",
+    "label": "Genuine college fee reminder",
+    "expected": "low",
+    "text": "Reminder: the last date to pay the semester fee of Rs 42,500 is 15 Oct 2026. Pay online on the official portal: https://fees.mitwpu.edu.in. A late fee applies after the due date. - Accounts Section"
+  },
+  {
+    "id": "genuine-rbi-advisory",
+    "label": "Genuine RBI public advisory",
+    "expected": "low",
+    "text": "Beware of fraudsters! RBI never calls or messages to ask for your OTP, PIN or card number. Do not click unknown links or install apps like AnyDesk on a caller's instruction. If cheated, report at cybercrime.gov.in or call 1930. - RBI Kehta Hai"
+  },
+  {
+    "id": "genuine-sbi-estatement",
+    "label": "Genuine SBI e-statement link",
+    "expected": "low",
+    "text": "SBI: your e-statement for Sep 2026 is ready. Log in at https://onlinesbi.sbi to view it. Do not share your password with anyone."
+  },
+  {
+    "id": "genuine-itr-refund",
+    "label": "Genuine income-tax refund notice",
+    "expected": "low",
+    "text": "Income Tax Department: your ITR for AY 2026-27 has been processed. A refund of Rs 12,430 will be credited to your bank account. Check the status at https://www.incometax.gov.in"
+  },
+  {
+    "id": "genuine-electricity-bill",
+    "label": "Genuine electricity bill notice",
+    "expected": "low",
+    "text": "MSEDCL: your electricity bill of Rs 1,240.00 for Sept 2026 has been generated. Due date 18 Oct. Pay at https://www.mahadiscom.in or on the official app. Ignore this if already paid."
+  },
+  {
+    "id": "genuine-friend-upi",
+    "label": "Friend asking for a small UPI transfer",
+    "expected": "low",
+    "text": "Bro can you send me ₹500 on UPI for the canteen? My card isn't working today. I'll return it tomorrow."
+  },
+  {
+    "id": "genuine-hindi-otp",
+    "label": "Genuine bank OTP (Hindi, Devanagari)",
+    "expected": "low",
+    "text": "आपका OTP 482910 है। यह 10 मिनट के लिए मान्य है। इसे किसी के साथ साझा न करें। -SBI"
+  },
+  {
+    "id": "genuine-recruiter",
+    "label": "Genuine interview invite",
+    "expected": "low",
+    "text": "Hi Aman, this is Neha from Infosys HR. Your interview is scheduled for 10 Oct, 11 AM on Microsoft Teams. The link is in your email. Please keep your ID proof ready."
   }
 ]
