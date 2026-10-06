@@ -95,6 +95,12 @@ const tick = () => new Promise(r => setTimeout(r, 5));
     check("hindi: delta message", e.els["delta"].textContent === "AI ने जोखिम बढ़ाया: 35 → 82");
     e.els["lang"].value = "mr"; e.els["lang"].onchange();
     check("switching language re-titles the result on screen", e.els["headline"].textContent === "हा संदेश फसवणूक वाटतो" && e.els["hFlags"].textContent.startsWith("आम्हाला"));
+    e.els["lang"].value = "en"; e.els["lang"].onchange();
+    check("the AI note follows the language too", e.els["aiNote"].textContent === ""); }
+  { const e = makeEnv(async (u, o) => res(o.body.get("ai") === "false" ? stage1 : { ...stage1, ai_error: "unavailable" }));
+    e.els["text"].value = "m"; await e.submit();
+    e.els["lang"].value = "hi"; e.els["lang"].onchange();
+    check("a settled warning note is re-translated on language change", e.els["aiNote"].textContent === " · AI उपलब्ध नहीं, केवल नियमों का परिणाम" && e.els["aiNote"].className.includes("warn"));
     e.els["lang"].value = "xx"; e.els["lang"].onchange();
     check("unknown language falls back to English", e.els["hWhy"].textContent === "Why"); }
   // 9. Screen-reader announcements

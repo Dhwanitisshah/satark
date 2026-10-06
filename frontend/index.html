@@ -80,6 +80,7 @@
   .note.warn { color: var(--sus); font-weight: 600; }
   .delta { display: inline-block; margin-top: 8px; padding: 3px 10px; border-radius: 999px; font-size: 14px; font-weight: 600;
            background: color-mix(in srgb, currentColor 14%, transparent); }
+  .delta[hidden] { display: none; }   /* display:inline-block above would otherwise beat the hidden attribute */
   .delta.flash { animation: flash 1.6s ease-out 2; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes flash { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 30% { box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 35%, transparent); } }
@@ -224,7 +225,7 @@ function applyLang() {
   $("hSteps").textContent = t("hSteps");
   $("footer").innerHTML = t("footer");
   if (!$("go").disabled) $("go").textContent = t("check");
-  if (lastResult) render(lastResult);   // re-title an on-screen result
+  if (lastResult) { render(lastResult); setNote(noteState.key, noteState.kind); }   // re-title an on-screen result
 }
 
 let lastResult = null;
@@ -308,9 +309,11 @@ function render(d) {
 }
 
 // The AI note under the result: pending while we wait, then settled, or a warning if the AI failed.
-function setNote(text, kind) {
+let noteState = { key: "", kind: "" };   // kept so the note can be re-translated if the language changes
+function setNote(key, kind) {
+  noteState = { key, kind };
   const n = $("aiNote");
-  n.textContent = text ? " · " + text : "";
+  n.textContent = key ? " · " + t(key) : "";
   n.className = "note" + (kind ? " " + kind : "");
 }
 
@@ -355,7 +358,7 @@ $("form").onsubmit = async e => {
       first = await callCheck(body("false"));          // rules only: comes back at once
       if (mine !== checkToken) return;
       render(first);
-      setNote(t("noteChecking"), "pending");
+      setNote("noteChecking", "pending");
       announce(`${t("headline_" + first.verdict)}. ${t("risk", { n: first.risk })}. ${t("noteChecking")}`);
       $("result").scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -372,7 +375,7 @@ $("form").onsubmit = async e => {
     if (mine !== checkToken) return;
     if (!second.ai_used) {
       if (!first) throw new Error("Couldn't read that screenshot right now. Try again, or paste the message text.");
-      setNote(t("noteUnavailable"), "warn");
+      setNote("noteUnavailable", "warn");
       announce(t("noteUnavailable"));
     } else {
       render(second);                                  // updates the same card in place
@@ -383,7 +386,7 @@ $("form").onsubmit = async e => {
     }
   } catch (err) {
     if (mine !== checkToken) return;
-    if (first) { setNote(t("noteUnavailable"), "warn"); announce(t("noteUnavailable")); }  // keep the rules result
+    if (first) { setNote("noteUnavailable", "warn"); announce(t("noteUnavailable")); }  // keep the rules result
     else $("error").textContent = err.name === "AbortError" ? "That took too long. Please try again." : err.message;
   } finally {
     clearTimeout(timer);
