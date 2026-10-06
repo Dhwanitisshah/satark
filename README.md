@@ -101,8 +101,13 @@ How to read this honestly:
   `.gov.in` links.
 - The one remaining false alarm is a friend asking for ₹500 on UPI, which the LLM rates "suspicious". It reads
   like a family-emergency scam without the pressure, so I left it rather than tune the prompt to one sample.
-- LLM column: `gemini-3.1-flash-lite`, one run, 62 of 63 samples got an AI score (one hit a 503 and fell back to
-  rules). LLM output varies from run to run. A small, author-written set is a smoke test, not a benchmark.
+- LLM column: `gemini-3.1-flash-lite`, 62 of 63 samples got an AI score (61 from Gemini, 1 from the Groq fallback
+  after two Gemini 503s, 1 timed out and fell back to rules). LLM output varies from run to run. A small,
+  author-written set is a smoke test, not a benchmark.
+- **Does the fallback hold up?** Re-running with the Gemini model deliberately broken, so that Groq
+  (`qwen/qwen3.8-27b`) had to answer every sample: 63 of 63 AI-scored, **43/43 scams caught, 8/8 rules-blind, 0/20
+  false alarms**. The numbers held, so a Gemini outage doesn't cost accuracy. The limit is throughput (about 8,000
+  tokens a minute on Groq's free tier), not quality.
 
 ## Run it locally (Windows / PowerShell)
 
