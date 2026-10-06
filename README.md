@@ -175,7 +175,16 @@ Response (trimmed):
 `"unavailable"` or `"bad_response"`; the UI then shows "AI unavailable, rules-only result". A screenshot that can't
 be read returns a friendly 503 rather than a false "no scam signs".
 
+Two more fields help when something is slow or down. `ai_timing` says how the answering call went (connect, TLS and
+first-byte milliseconds, whether the connection was reused, token counts, `cached: true` for a repeat). When the AI
+fails, `ai_attempts` lists each failed attempt with its provider, model, HTTP status (or error name such as
+`timeout`) and duration, for example `401` for a rejected API key or `429` for a rate limit. Neither contains a key or
+any message text.
+
 `GET /api/health` reports whether the LLM, vision, fallback and OCR are available.
+
+To measure a deployment, run `python scripts/measure_live.py <url>` (10 text and 3 screenshot checks by default, paced
+for Groq's rate limit): it prints the median and worst times and which provider answered each check.
 
 ## Deploy on Render (free)
 
