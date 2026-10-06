@@ -65,6 +65,15 @@
   ul.flags span { color: var(--muted); font-size: 15px; }
   ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
   .meta { font-size: 13px; color: var(--muted); margin-top: 14px; }
+  .note.pending::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%;
+                          border: 2px solid var(--muted); border-top-color: transparent; animation: spin .8s linear infinite; vertical-align: -1px; }
+  .note.warn { color: var(--sus); font-weight: 600; }
+  .delta { display: inline-block; margin-top: 8px; padding: 3px 10px; border-radius: 999px; font-size: 14px; font-weight: 600;
+           background: color-mix(in srgb, currentColor 14%, transparent); }
+  .delta.flash { animation: flash 1.6s ease-out 2; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes flash { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 30% { box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 35%, transparent); } }
+  @media (prefers-reduced-motion: reduce) { .note.pending::before, .delta.flash { animation: none; } }
   .error { color: var(--scam); margin-top: 12px; }
   footer { margin-top: 40px; font-size: 14px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
   footer b { color: var(--ink); }
@@ -99,7 +108,7 @@
 
   <div id="result" aria-live="polite">
     <div class="verdict" id="verdict">
-      <div><h2 id="headline"></h2><div class="type" id="type"></div></div>
+      <div><h2 id="headline"></h2><div class="type" id="type"></div><div class="delta" id="delta" hidden></div></div>
       <div class="gauge" id="gauge"><b id="risk"></b></div>
     </div>
     <div class="card" style="margin-top:14px">
@@ -107,7 +116,7 @@
       <section class="block" id="flagsBlock"><h3>Red flags we found</h3><ul class="flags" id="flags"></ul></section>
       <section class="block"><h3>The message</h3><div class="msg" id="msg"></div></section>
       <section class="block"><h3>What to do now</h3><ol class="steps" id="steps"></ol></section>
-      <div class="meta" id="meta"></div>
+      <div class="meta" id="meta"><span id="scores"></span><span id="aiNote" class="note"></span></div>
     </div>
   </div>
 
@@ -187,32 +196,84 @@ function render(d) {
   $("msg").innerHTML = highlight(d.analysed_text || "", d.highlights);
   const steps = $("steps"); steps.innerHTML = "";
   d.actions.forEach(a => { const li = document.createElement("li"); li.textContent = a; steps.appendChild(li); });
-  const aiNote = d.ai_used ? ` · AI score ${d.scores.llm}`
-    : d.ai_error === "bad_response" ? " · AI reply was unreadable, showing rules-only result"
-    : d.ai_error ? " · AI busy, showing rules-only result"
-    : " · AI analysis unavailable, rules only";
-  $("meta").textContent = `Rule score ${d.scores.rules}` + aiNote;
+  $("scores").textContent = `Rule score ${d.scores.rules}` + (d.ai_used ? ` · AI score ${d.scores.llm}` : "");
   $("result").style.display = "block";
-  $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// The AI note under the result: pending while we wait, then settled, or a warning if the AI failed.
+function setNote(text, kind) {
+  const n = $("aiNote");
+  n.textContent = text ? " · " + text : "";
+  n.className = "note" + (kind ? " " + kind : "");
+}
+
+function showDelta(before, after) {
+  const el = $("delta");
+  el.hidden = false;
+  el.classList.remove("flash"); void el.offsetWidth;   // restart the animation if it ran before
+  if (after > before) { el.textContent = `AI raised risk: ${before} → ${after}`; el.classList.add("flash"); }
+  else el.textContent = "AI agrees with the rules";
+}
+
+let checkToken = 0;   // a newer submit makes older, slower responses stale
+
+async function callCheck(fd, signal) {
+  const r = await fetch(API, { method: "POST", body: fd, signal });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || "Something went wrong.");
+  return d;
 }
 
 $("form").onsubmit = async e => {
   e.preventDefault();
   $("error").textContent = "";
-  const fd = new FormData();
-  fd.append("text", $("text").value);
-  fd.append("lang", $("lang").value);
-  if ($("image").files[0]) fd.append("image", $("image").files[0]);
-  $("go").disabled = true; $("go").textContent = "Checking…";
+  const mine = ++checkToken;
+  const text = $("text").value, lang = $("lang").value, file = $("image").files[0];
+  const body = ai => {
+    const fd = new FormData();
+    fd.append("text", text); fd.append("lang", lang); fd.append("ai", ai);
+    if (file) fd.append("image", file);
+    return fd;
+  };
+  const imageOnly = !text.trim() && file;   // reading a screenshot needs the AI, so there's no instant stage
+  $("go").disabled = true; $("go").textContent = imageOnly ? "Reading screenshot…" : "Checking…";
+  $("delta").hidden = true;
+  let first = null;
   try {
-    const r = await fetch(API, { method: "POST", body: fd });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || "Something went wrong.");
-    render(d);
+    if (!imageOnly) {
+      first = await callCheck(body("false"));          // rules only: comes back at once
+      if (mine !== checkToken) return;
+      render(first);
+      setNote("AI is double-checking…", "pending");
+      $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   } catch (err) {
-    $("error").textContent = err.message;
-  } finally {
+    if (mine === checkToken) $("error").textContent = err.message;
     $("go").disabled = false; $("go").textContent = "Check message";
+    return;
+  }
+  $("go").disabled = false; $("go").textContent = "Check message";
+
+  // Stage two: the same message with the AI. Bounded, so a slow provider can't leave the note spinning.
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 20000);
+  try {
+    const second = await callCheck(body("true"), ctl.signal);
+    if (mine !== checkToken) return;
+    if (!second.ai_used) {
+      if (!first) throw new Error("Couldn't read that screenshot right now. Try again, or paste the message text.");
+      setNote("AI unavailable, rules-only result", "warn");
+    } else {
+      render(second);                                  // updates the same card in place
+      setNote("", "");
+      if (first) showDelta(first.risk, second.risk);
+      else $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  } catch (err) {
+    if (mine !== checkToken) return;
+    if (first) setNote("AI unavailable, rules-only result", "warn");   // keep the rules result on screen
+    else $("error").textContent = err.name === "AbortError" ? "That took too long. Please try again." : err.message;
+  } finally {
+    clearTimeout(timer);
   }
 };
 </script>

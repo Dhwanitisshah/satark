@@ -48,8 +48,10 @@ def health() -> dict:
 async def check(
     text: str = Form(""),
     lang: str = Form("en"),
+    ai: bool = Form(True),
     image: UploadFile | None = File(None),
 ) -> dict:
+    """`ai=false` returns the rules-only verdict at once (the UI shows it first, then asks again with ai=true)."""
     text = (text or "").strip()[:MAX_TEXT_CHARS]
     if lang not in llm.LANG_NAMES:
         lang = "en"
@@ -71,6 +73,8 @@ async def check(
     if img_bytes is not None and not text:
         if ocr.available():
             text = ocr.image_to_text(img_bytes)[:MAX_TEXT_CHARS]
+        elif not ai:
+            raise HTTPException(422, "Reading a screenshot needs the AI step. Send it with ai=true.")
         elif not (llm.is_configured() and llm.vision_enabled()):
             raise HTTPException(
                 422, "Screenshot reading isn't set up on this server. Paste the message text instead."
@@ -78,10 +82,11 @@ async def check(
 
     rules = run_rules(text)
     judgement, ai_error = None, None
-    try:
-        judgement = await llm.analyse(text, lang, rules["signals"], img_bytes, img_mime)
-    except llm.LLMError as e:  # rules still answer; tell the client why the AI part is missing
-        ai_error = e.reason
+    if ai:
+        try:
+            judgement = await llm.analyse(text, lang, rules["signals"], img_bytes, img_mime)
+        except llm.LLMError as e:  # rules still answer; tell the client why the AI part is missing
+            ai_error = e.reason
 
     # A vision model may have read the image for us; re-run rules on that text.
     if not text and judgement and judgement.get("extracted_text"):
