@@ -31,7 +31,12 @@ async def main(use_llm: bool) -> None:
     print(f"{'sample':22} {'expected':11} {'got':11} {'rules':>5} {'llm':>5} {'final':>5}")
     for s in samples:
         rules = run_rules(s["text"])
-        judgement = await llm.analyse(s["text"], "en", rules["signals"]) if use_llm else None
+        judgement = None
+        if use_llm:
+            try:
+                judgement = await llm.analyse(s["text"], "en", rules["signals"])
+            except llm.LLMError:
+                pass  # falls back to rules, like the API does
         out = fuse(s["text"], rules, judgement)
         is_bad, flagged = s["expected"] != "low", out["verdict"] != "low"
         tp += is_bad and flagged

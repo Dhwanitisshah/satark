@@ -21,7 +21,7 @@ def band(score: int) -> str:
     return "low"
 
 
-def fuse(text: str, rules: dict, llm: dict | None) -> dict:
+def fuse(text: str, rules: dict, llm: dict | None, ai_error: str | None = None) -> dict:
     rule_score = rules["score"]
     if llm is not None:
         # Rules are hard evidence, so the LLM can raise risk but never talk a hard rule hit down.
@@ -65,5 +65,6 @@ def fuse(text: str, rules: dict, llm: dict | None) -> dict:
         "actions": build_actions(verdict, [s["id"] for s in rules["signals"]]),
         "scores": {"rules": rule_score, "llm": (llm or {}).get("risk")},
         "ai_used": llm is not None,
+        "ai_error": None if llm is not None else ai_error,
         "analysed_text": text,
     }

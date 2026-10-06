@@ -185,7 +185,11 @@ function render(d) {
   $("msg").innerHTML = highlight(d.analysed_text || "", d.highlights);
   const steps = $("steps"); steps.innerHTML = "";
   d.actions.forEach(a => { const li = document.createElement("li"); li.textContent = a; steps.appendChild(li); });
-  $("meta").textContent = `Rule score ${d.scores.rules}` + (d.ai_used ? ` · AI score ${d.scores.llm}` : " · AI analysis unavailable, rules only");
+  const aiNote = d.ai_used ? ` · AI score ${d.scores.llm}`
+    : d.ai_error === "bad_response" ? " · AI reply was unreadable, showing rules-only result"
+    : d.ai_error ? " · AI busy, showing rules-only result"
+    : " · AI analysis unavailable, rules only";
+  $("meta").textContent = `Rule score ${d.scores.rules}` + aiNote;
   $("result").style.display = "block";
   $("result").scrollIntoView({ behavior: "smooth", block: "start" });
 }

@@ -76,14 +76,21 @@ async def check(
             )
 
     rules = run_rules(text)
-    judgement = await llm.analyse(text, lang, rules["signals"], img_bytes, img_mime)
+    judgement, ai_error = None, None
+    try:
+        judgement = await llm.analyse(text, lang, rules["signals"], img_bytes, img_mime)
+    except llm.LLMError as e:  # rules still answer; tell the client why the AI part is missing
+        ai_error = e.reason
 
     # A vision model may have read the image for us; re-run rules on that text.
     if not text and judgement and judgement.get("extracted_text"):
         text = judgement["extracted_text"][:MAX_TEXT_CHARS]
         rules = run_rules(text)
 
-    return fuse(text, rules, judgement)
+    if not text:  # screenshot we couldn't read: "no scam signs" would be a false all-clear
+        raise HTTPException(503, "Couldn't read that screenshot right now. Try again, or paste the message text.")
+
+    return fuse(text, rules, judgement, ai_error)
 
 
 if FRONTEND.exists():
