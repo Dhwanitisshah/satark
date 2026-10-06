@@ -114,9 +114,13 @@ def main() -> None:
 
     report("TEXT checks", texts)
     report("SCREENSHOT checks", shots)
-    if any(not r["provider"] for r in texts + shots):
-        print("\nSome checks got no AI. The FAILED lines above say why (HTTP status per provider): "
-              "401 = rejected key, 429 = rate limit, 5xx = provider outage, timeout = too slow.")
+    everything = texts + shots
+    if not any(r["timing"] for r in everything):
+        print("\nNo per-call timing in the responses: the server only includes it when it runs with SATARK_DEBUG=true "
+              "(the wall times above are always real). Per-call timing and failures are always in the server log.")
+    if any(not r["provider"] for r in everything):
+        print("\nSome checks got no AI. With SATARK_DEBUG=true the FAILED lines say why (HTTP status per provider): "
+              "401 = rejected key, 429 = rate limit, 5xx = provider outage, timeout = too slow. Otherwise read the server log.")
         sys.exit(1)
 
 

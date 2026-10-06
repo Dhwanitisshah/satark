@@ -498,6 +498,10 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
                             provider_label(attempt.base), attempt.model,
                             provider_label(plan[i + 1].base), plan[i + 1].model, err.reason)
     if result is None:
+        # Always in the server log, whether or not the API response is allowed to carry the details.
+        log.warning("LLM gave no answer after %d attempt(s): %s", len(failures),
+                    "; ".join(f"{f['provider']}/{f['model']} status={f['status']} took={f['took_ms']}ms"
+                              for f in failures) or "no attempt was possible")
         first_error.attempts = failures  # type: ignore[union-attr]  (the failed primary always runs first)
         raise first_error  # type: ignore[misc]
 
