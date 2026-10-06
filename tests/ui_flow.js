@@ -9,19 +9,23 @@ const js = html.match(/<script>([\s\S]*)<\/script>/)[1];
 class El {
   constructor() { this._t = ""; this.children = []; this.style = { setProperty() {} }; this.hidden = false; this.className = "";
     this.value = ""; this.files = []; this.disabled = false; this.offsetWidth = 0; const s = new Set();
-    this.classList = { add: c => s.add(c), remove: c => s.delete(c), contains: c => s.has(c) }; this._s = s; }
+    this.classList = { add: c => s.add(c), remove: c => s.delete(c), contains: c => s.has(c) }; this._s = s;
+    this.attrs = {}; this.focused = false; this.src = ""; this.alt = ""; this.placeholder = ""; }
   set textContent(v) { this._t = v; } get textContent() { return this._t; }
   set innerHTML(v) { this._h = v; if (v === "") this.children = []; } get innerHTML() { return this._h || ""; }
-  appendChild(c) { this.children.push(c); } scrollIntoView() {} requestSubmit() {} setAttribute() {}
+  appendChild(c) { this.children.push(c); } scrollIntoView() {} requestSubmit() {} focus() { this.focused = true; }
+  setAttribute(k, v) { this.attrs[k] = v; }
 }
 function makeEnv(fetchImpl) {
   const els = new Proxy({}, { get: (t, id) => (t[id] ||= new El()) });
-  const document = { getElementById: id => els[id], createElement: () => new El() };
+  const document = { getElementById: id => els[id], createElement: () => new El(), documentElement: { lang: "" } };
   class FormData { constructor() { this.m = {}; } append(k, v) { this.m[k] = v; } get(k) { return this.m[k]; } }
   class AbortController { constructor() { this.signal = { aborted: false }; } abort() { this.signal.aborted = true; this.onabort && this.onabort(); } }
-  const ctx = { document, FormData, AbortController, fetch: fetchImpl, setTimeout, clearTimeout, window: {}, console, Promise };
+  const revoked = [];
+  const URL = { createObjectURL: f => "blob:" + f.name, revokeObjectURL: u => revoked.push(u) };
+  const ctx = { document, FormData, AbortController, URL, fetch: fetchImpl, setTimeout, clearTimeout, window: {}, console, Promise };
   vm.createContext(ctx); vm.runInContext(js, ctx);
-  return { els, ctx, submit: () => els["form"].onsubmit({ preventDefault() {} }) };
+  return { els, ctx, document, revoked, submit: () => els["form"].onsubmit({ preventDefault() {} }) };
 }
 const res = (d, ok = true) => Promise.resolve({ ok, json: () => Promise.resolve(d) });
 const base = { verdict: "scam", headline: "H", scam_type: "t", explanation: "e", signals: [], llm_flags: [], highlights: [], actions: [], analysed_text: "msg", ai_error: null };
@@ -77,6 +81,42 @@ const tick = () => new Promise(r => setTimeout(r, 5));
   { const seen = []; const e = makeEnv(async (u, o) => { seen.push(o.body.get("ai")); return res({ detail: "Paste a message or upload a screenshot." }, false); });
     await e.submit();
     check("stage-1 error shown, stage 2 not attempted", seen.join() === "false" && e.els["error"].textContent.startsWith("Paste")); }
+  // 8. Translations: headline, section titles, page text, gauge label, and re-titling on language change
+  { const e = makeEnv(async (u, o) => res(o.body.get("ai") === "false" ? stage1 : stage2));
+    check("english by default", e.els["hWhy"].textContent === "Why" && e.els["go"].textContent === "Check message" && e.document.documentElement.lang === "en");
+    e.els["lang"].value = "hi"; e.els["lang"].onchange();
+    check("hindi: html lang, titles and button", e.document.documentElement.lang === "hi" && e.els["hWhy"].textContent === "कारण"
+      && e.els["hSteps"].textContent === "अब क्या करें" && e.els["go"].textContent === "संदेश जाँचें");
+    check("hindi: placeholder, aria-label and footer", e.els["text"].placeholder.startsWith("मिला हुआ") && e.els["lang"].attrs["aria-label"] === "स्पष्टीकरण की भाषा"
+      && e.els["footer"].innerHTML.includes("1930"));
+    e.els["text"].value = "m"; await e.submit();
+    check("hindi: translated headline for the verdict", e.els["headline"].textContent === "यह संदेश धोखाधड़ी लगता है");
+    check("hindi: gauge is labelled for assistive tech", e.els["gauge"].attrs["aria-label"] === "जोखिम 82/100");
+    check("hindi: delta message", e.els["delta"].textContent === "AI ने जोखिम बढ़ाया: 35 → 82");
+    e.els["lang"].value = "mr"; e.els["lang"].onchange();
+    check("switching language re-titles the result on screen", e.els["headline"].textContent === "हा संदेश फसवणूक वाटतो" && e.els["hFlags"].textContent.startsWith("आम्हाला"));
+    e.els["lang"].value = "xx"; e.els["lang"].onchange();
+    check("unknown language falls back to English", e.els["hWhy"].textContent === "Why"); }
+  // 9. Screen-reader announcements
+  { const e = makeEnv(async (u, o) => res(o.body.get("ai") === "false" ? stage1 : stage2));
+    const said = []; Object.defineProperty(e.els["announce"], "textContent", { set(v) { if (v) said.push(v); }, get() { return ""; } });
+    e.els["text"].value = "m"; await e.submit();
+    check("announces the instant result with its risk", said[0] === "This looks like a scam. Risk 35 out of 100. AI is double-checking…");
+    check("announces the AI update", said[1] === "AI raised risk: 35 → 82. This looks like a scam. Risk 82 out of 100"); }
+  { const e = makeEnv(async (u, o) => res(o.body.get("ai") === "false" ? stage1 : { ...stage1, ai_error: "unavailable" }));
+    const said = []; Object.defineProperty(e.els["announce"], "textContent", { set(v) { if (v) said.push(v); }, get() { return ""; } });
+    e.els["text"].value = "m"; await e.submit();
+    check("announces when the AI is unavailable", said[1] === "AI unavailable, rules-only result"); }
+  // 10. Screenshot preview and remove button
+  { const e = makeEnv(async () => res(stage1));
+    e.els["image"].files = [{ name: "shot.png" }]; e.els["image"].onchange({ target: e.els["image"] });
+    check("preview shown with thumbnail and file name", e.els["preview"].hidden === false && e.els["thumb"].src === "blob:shot.png" && e.els["fileName"].textContent === "shot.png");
+    check("drop zone marked as holding a file", e.els["drop"]._s.has("has"));
+    check("remove button has an accessible name", e.els["removeImg"].attrs["aria-label"] === "Remove screenshot");
+    e.els["removeImg"].onclick();
+    check("remove hides the preview, frees the blob and clears the input", e.els["preview"].hidden === true && e.revoked.includes("blob:shot.png")
+      && e.els["image"].value === "" && !e.els["drop"]._s.has("has"));
+    check("remove returns focus to the file input", e.els["image"].focused === true); }
   console.log(failed ? `${failed} FAILED` : "all UI-flow checks passed"); process.exit(failed ? 1 : 0);
 })();
 

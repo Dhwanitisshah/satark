@@ -29,17 +29,27 @@
   header h1 span { color: var(--accent); }
   header p { margin: 0 0 28px; color: var(--muted); font-size: 18px; max-width: 34em; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
+  .sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; padding: 0; }
   textarea { width: 100%; min-height: 150px; resize: vertical; border: 1px solid var(--line); border-radius: 12px;
              padding: 14px; font: inherit; background: var(--paper); color: var(--ink); }
-  textarea:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Visible focus for every control, keyboard users included. */
+  textarea:focus-visible, select:focus-visible, button:focus-visible, .drop:focus-within, #result:focus-visible, a:focus-visible {
+    outline: 3px solid var(--accent); outline-offset: 2px; }
   .hint { margin-top: 6px; font-size: 13px; color: var(--muted); }
   .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
   .drop { flex: 1 1 220px; border: 1.5px dashed var(--line); border-radius: 12px; padding: 10px 14px; color: var(--muted);
           cursor: pointer; font-size: 14px; }
   .drop.has { border-color: var(--accent); color: var(--ink); }
+  .preview { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 8px; border: 1px solid var(--line); border-radius: 12px; }
+  .preview[hidden] { display: none; }
+  .preview img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+  .preview span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+  button.remove { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: var(--card);
+                  color: var(--ink); font: 600 20px/1 Inter, sans-serif; cursor: pointer; }
+  button.remove:hover { border-color: var(--accent); color: var(--accent); }
   select { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--card); color: var(--ink); font: inherit; }
   button.primary { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px; padding: 12px 22px;
-                   font: 600 16px Inter, sans-serif; cursor: pointer; }
+                   font: 600 16px Inter, "Noto Sans Devanagari", sans-serif; cursor: pointer; }
   button.primary:disabled { opacity: .6; cursor: wait; }
   .samples { margin-top: 16px; font-size: 14px; color: var(--muted); }
   .chip { display: inline-block; margin: 6px 6px 0 0; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line);
@@ -50,7 +60,7 @@
   .verdict.scam { background: var(--scam-bg); color: var(--scam); }
   .verdict.suspicious { background: var(--sus-bg); color: var(--sus); }
   .verdict.low { background: var(--low-bg); color: var(--low); }
-  .verdict h2 { font-family: Fraunces, Georgia, serif; margin: 0; font-size: 28px; line-height: 1.15; }
+  .verdict h2 { font-family: Fraunces, "Noto Sans Devanagari", Georgia, serif; margin: 0; font-size: 28px; line-height: 1.15; }
   .verdict .type { margin-top: 4px; font-weight: 600; }
   .gauge { width: 76px; height: 76px; border-radius: 50%; display: grid; place-items: center; font: 700 22px Inter, sans-serif;
            background: conic-gradient(currentColor calc(var(--v) * 1%), color-mix(in srgb, currentColor 15%, transparent) 0); }
@@ -84,46 +94,50 @@
 <main>
   <header>
     <h1>Satark<span>.</span></h1>
-    <p>Got a strange SMS, WhatsApp message or call script? Paste it here before you click, pay or reply.</p>
+    <p id="tagline"></p>
   </header>
 
   <form class="card" id="form">
-    <label for="text" class="sr" style="position:absolute;left:-9999px">Message</label>
-    <textarea id="text" placeholder="Paste the message you received…"></textarea>
-    <div class="hint">Don't paste personal details like account numbers.</div>
+    <label for="text" class="sr" id="textLabel"></label>
+    <textarea id="text" aria-describedby="hint"></textarea>
+    <div class="hint" id="hint"></div>
     <div class="row">
-      <label class="drop" id="drop">📎 <span id="dropLabel">Or add a screenshot (PNG/JPG)</span>
-        <input type="file" id="image" accept="image/*" hidden>
+      <label class="drop" id="drop">📎 <span id="dropLabel"></span>
+        <input type="file" id="image" accept="image/*" class="sr">
       </label>
-      <select id="lang" aria-label="Explanation language">
+      <select id="lang">
         <option value="en">English</option>
         <option value="hi">हिंदी</option>
         <option value="mr">मराठी</option>
       </select>
-      <button class="primary" id="go" type="submit">Check message</button>
+      <button class="primary" id="go" type="submit"></button>
     </div>
-    <div class="samples">Try an example:<br><span id="chips"></span></div>
+    <div class="preview" id="preview" hidden>
+      <img id="thumb" alt="">
+      <span id="fileName"></span>
+      <button type="button" class="remove" id="removeImg">×</button>
+    </div>
+    <div class="samples"><span id="examples"></span><br><span id="chips"></span></div>
     <div class="error" id="error" role="alert"></div>
   </form>
 
-  <div id="result" aria-live="polite">
+  <div id="announce" class="sr" role="status" aria-live="polite"></div>
+
+  <section id="result" aria-labelledby="headline" tabindex="-1">
     <div class="verdict" id="verdict">
       <div><h2 id="headline"></h2><div class="type" id="type"></div><div class="delta" id="delta" hidden></div></div>
-      <div class="gauge" id="gauge"><b id="risk"></b></div>
+      <div class="gauge" id="gauge" role="img"><b id="risk"></b></div>
     </div>
     <div class="card" style="margin-top:14px">
-      <section class="block" style="margin-top:0"><h3>Why</h3><div id="explanation"></div></section>
-      <section class="block" id="flagsBlock"><h3>Red flags we found</h3><ul class="flags" id="flags"></ul></section>
-      <section class="block"><h3>The message</h3><div class="msg" id="msg"></div></section>
-      <section class="block"><h3>What to do now</h3><ol class="steps" id="steps"></ol></section>
+      <section class="block" style="margin-top:0"><h3 id="hWhy"></h3><div id="explanation"></div></section>
+      <section class="block" id="flagsBlock"><h3 id="hFlags"></h3><ul class="flags" id="flags"></ul></section>
+      <section class="block"><h3 id="hMsg"></h3><div class="msg" id="msg"></div></section>
+      <section class="block"><h3 id="hSteps"></h3><ol class="steps" id="steps"></ol></section>
       <div class="meta" id="meta"><span id="scores"></span><span id="aiNote" class="note"></span></div>
     </div>
-  </div>
+  </section>
 
-  <footer>
-    Lost money? Call <b>1930</b> immediately and report at <b>cybercrime.gov.in</b>.
-    Satark doesn't store your messages. It is a second opinion, not a guarantee.
-  </footer>
+  <footer id="footer"></footer>
 </main>
 
 <script>
@@ -135,8 +149,85 @@ const SAMPLES = [
   ["Family emergency", "Papa this is my new number, my phone fell in water. I need ₹15,000 urgently for hospital fees, please send to rahul.k99@ybl, don't tell mummy"],
   ["Real bank OTP", "483920 is your OTP for a transaction of Rs 2,499.00 at AMAZON on HDFC Bank card XX1234. Valid for 10 mins. Do not share OTP with anyone. -HDFC Bank"],
 ];
+
+// Interface strings. The advice steps and the explanation come from the server (the steps are a fixed,
+// reviewed playbook), so only the page chrome, the headline and the section titles are translated here.
+const I18N = {
+  en: {
+    tagline: "Got a strange SMS, WhatsApp message or call script? Paste it here before you click, pay or reply.",
+    textLabel: "Message", placeholder: "Paste the message you received…",
+    hint: "Don't paste personal details like account numbers.",
+    drop: "Or add a screenshot (PNG/JPG)", langLabel: "Explanation language",
+    check: "Check message", checking: "Checking…", reading: "Reading screenshot…",
+    examples: "Try an example:", removeImg: "Remove screenshot", thumbAlt: "Preview of the screenshot you added",
+    hWhy: "Why", hFlags: "Red flags we found", hMsg: "The message", hSteps: "What to do now",
+    headline_scam: "This looks like a scam", headline_suspicious: "Be careful: this has warning signs",
+    headline_low: "No common scam signs found",
+    scoreRules: "Rule score", scoreAI: "AI score", risk: "Risk {n} out of 100",
+    noteChecking: "AI is double-checking…", noteUnavailable: "AI unavailable, rules-only result",
+    deltaRaised: "AI raised risk: {a} → {b}", deltaAgrees: "AI agrees with the rules",
+    footer: "Lost money? Call <b>1930</b> immediately and report at <b>cybercrime.gov.in</b>. Satark doesn't store your messages. It is a second opinion, not a guarantee.",
+  },
+  hi: {
+    tagline: "कोई अजीब SMS, WhatsApp संदेश या कॉल स्क्रिप्ट मिली? क्लिक करने, भुगतान करने या जवाब देने से पहले उसे यहाँ चिपकाएँ।",
+    textLabel: "संदेश", placeholder: "मिला हुआ संदेश यहाँ चिपकाएँ…",
+    hint: "खाता नंबर जैसी निजी जानकारी न चिपकाएँ।",
+    drop: "या स्क्रीनशॉट जोड़ें (PNG/JPG)", langLabel: "स्पष्टीकरण की भाषा",
+    check: "संदेश जाँचें", checking: "जाँच हो रही है…", reading: "स्क्रीनशॉट पढ़ा जा रहा है…",
+    examples: "उदाहरण आज़माएँ:", removeImg: "स्क्रीनशॉट हटाएँ", thumbAlt: "आपके जोड़े गए स्क्रीनशॉट का पूर्वावलोकन",
+    hWhy: "कारण", hFlags: "हमें मिले चेतावनी संकेत", hMsg: "संदेश", hSteps: "अब क्या करें",
+    headline_scam: "यह संदेश धोखाधड़ी लगता है", headline_suspicious: "सावधान: इसमें खतरे के संकेत हैं",
+    headline_low: "धोखाधड़ी के आम संकेत नहीं मिले",
+    scoreRules: "नियम स्कोर", scoreAI: "AI स्कोर", risk: "जोखिम {n}/100",
+    noteChecking: "AI दोबारा जाँच रहा है…", noteUnavailable: "AI उपलब्ध नहीं, केवल नियमों का परिणाम",
+    deltaRaised: "AI ने जोखिम बढ़ाया: {a} → {b}", deltaAgrees: "AI नियमों से सहमत है",
+    footer: "पैसे चले गए? तुरंत <b>1930</b> पर कॉल करें और <b>cybercrime.gov.in</b> पर शिकायत करें। Satark आपके संदेश सहेजता नहीं है। यह दूसरी राय है, गारंटी नहीं।",
+  },
+  mr: {
+    tagline: "विचित्र SMS, WhatsApp संदेश किंवा कॉल स्क्रिप्ट मिळाली? क्लिक करण्यापूर्वी, पैसे भरण्यापूर्वी किंवा उत्तर देण्यापूर्वी ती इथे पेस्ट करा.",
+    textLabel: "संदेश", placeholder: "मिळालेला संदेश इथे पेस्ट करा…",
+    hint: "खाते क्रमांकासारखी वैयक्तिक माहिती पेस्ट करू नका.",
+    drop: "किंवा स्क्रीनशॉट जोडा (PNG/JPG)", langLabel: "स्पष्टीकरणाची भाषा",
+    check: "संदेश तपासा", checking: "तपासत आहे…", reading: "स्क्रीनशॉट वाचत आहे…",
+    examples: "उदाहरण वापरून पहा:", removeImg: "स्क्रीनशॉट काढा", thumbAlt: "तुम्ही जोडलेल्या स्क्रीनशॉटचे पूर्वावलोकन",
+    hWhy: "कारण", hFlags: "आम्हाला आढळलेली धोक्याची चिन्हे", hMsg: "संदेश", hSteps: "आता काय करावे",
+    headline_scam: "हा संदेश फसवणूक वाटतो", headline_suspicious: "सावध रहा: यात धोक्याची चिन्हे आहेत",
+    headline_low: "फसवणुकीची सामान्य चिन्हे आढळली नाहीत",
+    scoreRules: "नियम स्कोअर", scoreAI: "AI स्कोअर", risk: "धोका {n}/100",
+    noteChecking: "AI पुन्हा तपासत आहे…", noteUnavailable: "AI उपलब्ध नाही, फक्त नियमांवर आधारित निकाल",
+    deltaRaised: "AI ने धोका वाढवला: {a} → {b}", deltaAgrees: "AI नियमांशी सहमत आहे",
+    footer: "पैसे गेले? ताबडतोब <b>1930</b> वर कॉल करा आणि <b>cybercrime.gov.in</b> वर तक्रार करा. Satark तुमचे संदेश साठवत नाही. हे दुसरे मत आहे, हमी नाही.",
+  },
+};
+
 const $ = id => document.getElementById(id);
 const API = (window.SATARK_API || "") + "/api/check";
+const curLang = () => (I18N[$("lang").value] ? $("lang").value : "en");
+const t = (key, vars = {}) =>
+  (I18N[curLang()][key] ?? I18N.en[key]).replace(/\{(\w+)\}/g, (_, k) => vars[k]);
+
+// Static page text, applied on load and whenever the language select changes.
+function applyLang() {
+  document.documentElement.lang = curLang();
+  $("tagline").textContent = t("tagline");
+  $("textLabel").textContent = t("textLabel");
+  $("text").placeholder = t("placeholder");
+  $("hint").textContent = t("hint");
+  $("dropLabel").textContent = t("drop");
+  $("lang").setAttribute("aria-label", t("langLabel"));
+  $("examples").textContent = t("examples");
+  $("removeImg").setAttribute("aria-label", t("removeImg"));
+  $("thumb").alt = t("thumbAlt");
+  $("hWhy").textContent = t("hWhy");
+  $("hFlags").textContent = t("hFlags");
+  $("hMsg").textContent = t("hMsg");
+  $("hSteps").textContent = t("hSteps");
+  $("footer").innerHTML = t("footer");
+  if (!$("go").disabled) $("go").textContent = t("check");
+  if (lastResult) render(lastResult);   // re-title an on-screen result
+}
+
+let lastResult = null;
 
 SAMPLES.forEach(([name, text]) => {
   const b = document.createElement("button");
@@ -145,11 +236,22 @@ SAMPLES.forEach(([name, text]) => {
   $("chips").appendChild(b);
 });
 
-function clearImage() { $("image").value = ""; $("drop").classList.remove("has"); $("dropLabel").textContent = "Or add a screenshot (PNG/JPG)"; }
+let thumbURL = null;
+function clearImage() {
+  $("image").value = "";
+  if (thumbURL) { URL.revokeObjectURL(thumbURL); thumbURL = null; }
+  $("thumb").src = ""; $("preview").hidden = true; $("drop").classList.remove("has");
+}
 $("image").onchange = e => {
   const f = e.target.files[0];
-  if (f) { $("drop").classList.add("has"); $("dropLabel").textContent = f.name; } else clearImage();
+  clearImage();
+  if (!f) return;
+  thumbURL = URL.createObjectURL(f);
+  $("thumb").src = thumbURL; $("fileName").textContent = f.name;
+  $("preview").hidden = false; $("drop").classList.add("has");
 };
+$("removeImg").onclick = () => { clearImage(); $("image").focus(); };
+$("lang").onchange = applyLang;
 
 const esc = s => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -171,12 +273,17 @@ function highlight(text, phrases) {
   return out + esc(text.slice(pos));
 }
 
+// Screen readers hear one short summary instead of the whole card being re-read on every update.
+const announce = msg => { $("announce").textContent = ""; $("announce").textContent = msg; };
+
 function render(d) {
+  lastResult = d;
   const v = $("verdict");
   v.className = "verdict " + d.verdict;
-  $("headline").textContent = d.headline;
+  $("headline").textContent = t("headline_" + d.verdict);
   $("type").textContent = d.scam_type || "";
   $("gauge").style.setProperty("--v", d.risk);
+  $("gauge").setAttribute("aria-label", t("risk", { n: d.risk }));
   $("risk").textContent = d.risk;
   $("explanation").textContent = d.explanation;
 
@@ -196,7 +303,7 @@ function render(d) {
   $("msg").innerHTML = highlight(d.analysed_text || "", d.highlights);
   const steps = $("steps"); steps.innerHTML = "";
   d.actions.forEach(a => { const li = document.createElement("li"); li.textContent = a; steps.appendChild(li); });
-  $("scores").textContent = `Rule score ${d.scores.rules}` + (d.ai_used ? ` · AI score ${d.scores.llm}` : "");
+  $("scores").textContent = `${t("scoreRules")} ${d.scores.rules}` + (d.ai_used ? ` · ${t("scoreAI")} ${d.scores.llm}` : "");
   $("result").style.display = "block";
 }
 
@@ -211,8 +318,10 @@ function showDelta(before, after) {
   const el = $("delta");
   el.hidden = false;
   el.classList.remove("flash"); void el.offsetWidth;   // restart the animation if it ran before
-  if (after > before) { el.textContent = `AI raised risk: ${before} → ${after}`; el.classList.add("flash"); }
-  else el.textContent = "AI agrees with the rules";
+  const raised = after > before;
+  el.textContent = raised ? t("deltaRaised", { a: before, b: after }) : t("deltaAgrees");
+  if (raised) el.classList.add("flash");
+  return el.textContent;
 }
 
 let checkToken = 0;   // a newer submit makes older, slower responses stale
@@ -223,6 +332,8 @@ async function callCheck(fd, signal) {
   if (!r.ok) throw new Error(d.detail || "Something went wrong.");
   return d;
 }
+
+function setBusy(label) { $("go").disabled = !!label; $("go").textContent = label || t("check"); }
 
 $("form").onsubmit = async e => {
   e.preventDefault();
@@ -236,7 +347,7 @@ $("form").onsubmit = async e => {
     return fd;
   };
   const imageOnly = !text.trim() && file;   // reading a screenshot needs the AI, so there's no instant stage
-  $("go").disabled = true; $("go").textContent = imageOnly ? "Reading screenshot…" : "Checking…";
+  setBusy(imageOnly ? t("reading") : t("checking"));
   $("delta").hidden = true;
   let first = null;
   try {
@@ -244,15 +355,15 @@ $("form").onsubmit = async e => {
       first = await callCheck(body("false"));          // rules only: comes back at once
       if (mine !== checkToken) return;
       render(first);
-      setNote("AI is double-checking…", "pending");
+      setNote(t("noteChecking"), "pending");
+      announce(`${t("headline_" + first.verdict)}. ${t("risk", { n: first.risk })}. ${t("noteChecking")}`);
       $("result").scrollIntoView({ behavior: "smooth", block: "start" });
     }
   } catch (err) {
-    if (mine === checkToken) $("error").textContent = err.message;
-    $("go").disabled = false; $("go").textContent = "Check message";
+    if (mine === checkToken) { $("error").textContent = err.message; setBusy(""); }
     return;
   }
-  $("go").disabled = false; $("go").textContent = "Check message";
+  setBusy("");
 
   // Stage two: the same message with the AI. Bounded, so a slow provider can't leave the note spinning.
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 20000);
@@ -261,21 +372,25 @@ $("form").onsubmit = async e => {
     if (mine !== checkToken) return;
     if (!second.ai_used) {
       if (!first) throw new Error("Couldn't read that screenshot right now. Try again, or paste the message text.");
-      setNote("AI unavailable, rules-only result", "warn");
+      setNote(t("noteUnavailable"), "warn");
+      announce(t("noteUnavailable"));
     } else {
       render(second);                                  // updates the same card in place
       setNote("", "");
-      if (first) showDelta(first.risk, second.risk);
-      else $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+      const change = first ? showDelta(first.risk, second.risk) : "";
+      announce(`${change ? change + ". " : ""}${t("headline_" + second.verdict)}. ${t("risk", { n: second.risk })}`);
+      if (!first) $("result").scrollIntoView({ behavior: "smooth", block: "start" });
     }
   } catch (err) {
     if (mine !== checkToken) return;
-    if (first) setNote("AI unavailable, rules-only result", "warn");   // keep the rules result on screen
+    if (first) { setNote(t("noteUnavailable"), "warn"); announce(t("noteUnavailable")); }  // keep the rules result
     else $("error").textContent = err.name === "AbortError" ? "That took too long. Please try again." : err.message;
   } finally {
     clearTimeout(timer);
   }
 };
+
+applyLang();
 </script>
 </body>
 </html>
