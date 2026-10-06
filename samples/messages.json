@@ -1,0 +1,86 @@
+[
+  {
+    "id": "digital-arrest",
+    "label": "'Digital arrest' call script",
+    "expected": "scam",
+    "text": "This is Inspector Rajesh Kumar from Mumbai Police Cyber Crime Department. A parcel in your name containing drugs was seized by customs. A case of money laundering is registered against you. You are under digital arrest. Do not tell anyone or disconnect the video call. Transfer Rs 1,50,000 to the RBI verification account immediately to clear your name."
+  },
+  {
+    "id": "kyc-sms",
+    "label": "Fake SBI KYC SMS",
+    "expected": "scam",
+    "text": "Dear Customer, your SBI YONO account will be blocked today. Update your PAN/KYC immediately: http://sbi-kyc-update.xyz/login"
+  },
+  {
+    "id": "electricity",
+    "label": "Electricity disconnection SMS",
+    "expected": "scam",
+    "text": "Dear consumer your electricity power will be disconnected tonight at 9.30pm because your previous month bill was not update. Please immediately contact our electricity officer 9876543210 Thank you"
+  },
+  {
+    "id": "task-job",
+    "label": "Part-time 'like videos' job",
+    "expected": "scam",
+    "text": "Hi, I'm Priya from Amazon HR. Part-time job available! Earn ₹3000-8000 daily by liking YouTube videos. No experience needed. Contact on Telegram: t.me/amz_tasks_hr"
+  },
+  {
+    "id": "upi-cashback",
+    "label": "Fake cashback + UPI PIN",
+    "expected": "scam",
+    "text": "Congratulations! You have won a cashback of ₹5,000 from PhonePe. Scan the QR code and enter your UPI PIN to receive money. Offer valid for 30 minutes only."
+  },
+  {
+    "id": "apk-rewards",
+    "label": "SBI rewards .apk",
+    "expected": "scam",
+    "text": "SBI Rewards: Your 7,250 reward points expire today. Redeem now by installing SBI REWARD.apk"
+  },
+  {
+    "id": "family-new-number",
+    "label": "'New number' family emergency",
+    "expected": "scam",
+    "text": "Papa this is my new number, my phone fell in water. I need ₹15,000 urgently for hospital fees, please send to rahul.k99@ybl, don't tell mummy"
+  },
+  {
+    "id": "courier-ivr",
+    "label": "FedEx customs IVR",
+    "expected": "scam",
+    "text": "Your FedEx parcel is on hold at customs due to illegal items. Press 1 to speak to our officer or call +92 300 1234567 within 2 hours to avoid legal action."
+  },
+  {
+    "id": "fine-upi",
+    "label": "Traffic fine to personal UPI",
+    "expected": "scam",
+    "text": "Traffic e-challan pending: pay fine of Rs 500 today itself to avoid court case. Pay to echallan.police@ybl"
+  },
+  {
+    "id": "investment-group",
+    "label": "Guaranteed-returns trading group",
+    "expected": "suspicious",
+    "text": "Join our SEBI-registered VIP trading group! Guaranteed 30% returns every month. Limited seats, join now on WhatsApp: wa.me/919876543210"
+  },
+  {
+    "id": "bank-otp",
+    "label": "Genuine bank OTP alert",
+    "expected": "low",
+    "text": "483920 is your OTP for a transaction of Rs 2,499.00 at AMAZON on HDFC Bank card XX1234. Valid for 10 mins. Do not share OTP with anyone. -HDFC Bank"
+  },
+  {
+    "id": "delivery",
+    "label": "Genuine Amazon delivery",
+    "expected": "low",
+    "text": "Your Amazon order #402-1234567 has been delivered. Track at https://www.amazon.in/your-orders"
+  },
+  {
+    "id": "friend",
+    "label": "Normal chat",
+    "expected": "low",
+    "text": "Hey! Are we still on for dinner tomorrow at 8? I'll book a table at the usual place."
+  },
+  {
+    "id": "bank-warning",
+    "label": "Genuine bank fraud warning",
+    "expected": "low",
+    "text": "SBI never asks for your OTP, PIN or password. Never share these with anyone, and do not install screen sharing apps like AnyDesk on a stranger's request."
+  }
+]
