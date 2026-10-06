@@ -16,14 +16,17 @@ class El {
   appendChild(c) { this.children.push(c); } scrollIntoView() {} requestSubmit() {} focus() { this.focused = true; }
   setAttribute(k, v) { this.attrs[k] = v; }
 }
-function makeEnv(fetchImpl) {
+// healthImpl answers GET /api/health (the page pings it on load); everything else goes to fetchImpl.
+function makeEnv(fetchImpl, healthImpl = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })) {
   const els = new Proxy({}, { get: (t, id) => (t[id] ||= new El()) });
   const document = { getElementById: id => els[id], createElement: () => new El(), documentElement: { lang: "" } };
   class FormData { constructor() { this.m = {}; } append(k, v) { this.m[k] = v; } get(k) { return this.m[k]; } }
   class AbortController { constructor() { this.signal = { aborted: false }; } abort() { this.signal.aborted = true; this.onabort && this.onabort(); } }
   const revoked = [];
   const URL = { createObjectURL: f => "blob:" + f.name, revokeObjectURL: u => revoked.push(u) };
-  const ctx = { document, FormData, AbortController, URL, fetch: fetchImpl, setTimeout, clearTimeout, window: {}, console, Promise };
+  const fetch = (url, o) => (String(url).endsWith("/api/health") ? healthImpl(url) : fetchImpl(url, o));
+  const ctx = { document, FormData, AbortController, AbortSignal: { timeout: () => ({}) }, URL, fetch, setTimeout, clearTimeout,
+                window: { SATARK_WAKE_MS: 40 }, console, Promise };
   vm.createContext(ctx); vm.runInContext(js, ctx);
   return { els, ctx, document, revoked, submit: () => els["form"].onsubmit({ preventDefault() {} }) };
 }
@@ -123,6 +126,25 @@ const tick = () => new Promise(r => setTimeout(r, 5));
     check("remove hides the preview, frees the blob and clears the input", e.els["preview"].hidden === true && e.revoked.includes("blob:shot.png")
       && e.els["image"].value === "" && !e.els["drop"]._s.has("has"));
     check("remove returns focus to the file input", e.els["image"].focused === true); }
+  // 11. "Waking up the server…" for a slow (sleeping) host
+  { let wakeUp; const asleep = new Promise(r => wakeUp = r);
+    const e = makeEnv(async () => res(stage1), () => asleep.then(() => ({ ok: true, json: async () => ({ ok: true }) })));
+    await new Promise(r => setTimeout(r, 90));
+    check("banner appears when /api/health is slow", e.els["wake"].hidden === false && e.els["wake"].textContent.startsWith("Waking up the server"));
+    e.els["lang"].value = "hi"; e.els["lang"].onchange();
+    check("banner is translated", e.els["wake"].textContent.startsWith("सर्वर चालू हो रहा है"));
+    wakeUp(); await tick(); await tick();
+    check("banner hides once the server answers", e.els["wake"].hidden === true); }
+  { const e = makeEnv(async () => res(stage1));
+    await new Promise(r => setTimeout(r, 90));
+    check("fast server: banner never shown", e.els["wake"].hidden === true); }
+  { let wakeUp; const asleep = new Promise(r => wakeUp = r);
+    const e = makeEnv(async (u, o) => { if (o.body.get("ai") === "false") await asleep; return res(o.body.get("ai") === "false" ? stage1 : stage2); });
+    e.els["text"].value = "m"; const done = e.submit();
+    await new Promise(r => setTimeout(r, 90));
+    check("banner also shows while the first check is waiting on a sleeping server", e.els["wake"].hidden === false);
+    wakeUp(); await done;
+    check("and hides when the result arrives", e.els["wake"].hidden === true && e.els["risk"].textContent === 82); }
   console.log(failed ? `${failed} FAILED` : "all UI-flow checks passed"); process.exit(failed ? 1 : 0);
 })();
 

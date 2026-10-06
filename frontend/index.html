@@ -84,7 +84,11 @@
   .delta.flash { animation: flash 1.6s ease-out 2; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes flash { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 30% { box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 35%, transparent); } }
-  @media (prefers-reduced-motion: reduce) { .note.pending::before, .delta.flash { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .note.pending::before, .wake::before, .delta.flash { animation: none; } }
+  .wake { margin: 0 0 16px; padding: 12px 16px; border-radius: 12px; background: var(--sus-bg); color: var(--sus); font-weight: 600; }
+  .wake[hidden] { display: none; }
+  .wake::before { content: ""; display: inline-block; width: 11px; height: 11px; margin-right: 8px; border-radius: 50%;
+                  border: 2px solid currentColor; border-top-color: transparent; animation: spin .8s linear infinite; vertical-align: -1px; }
   .error { color: var(--scam); margin-top: 12px; }
   footer { margin-top: 40px; font-size: 14px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
   footer b { color: var(--ink); }
@@ -97,6 +101,8 @@
     <h1>Satark<span>.</span></h1>
     <p id="tagline"></p>
   </header>
+
+  <div class="wake" id="wake" role="status" hidden></div>
 
   <form class="card" id="form">
     <label for="text" class="sr" id="textLabel"></label>
@@ -167,6 +173,7 @@ const I18N = {
     scoreRules: "Rule score", scoreAI: "AI score", risk: "Risk {n} out of 100",
     noteChecking: "AI is double-checking…", noteUnavailable: "AI unavailable, rules-only result",
     deltaRaised: "AI raised risk: {a} → {b}", deltaAgrees: "AI agrees with the rules",
+    wake: "Waking up the server… the first load can take up to a minute.",
     footer: "Lost money? Call <b>1930</b> immediately and report at <b>cybercrime.gov.in</b>. Satark doesn't store your messages. It is a second opinion, not a guarantee.",
   },
   hi: {
@@ -182,6 +189,7 @@ const I18N = {
     scoreRules: "नियम स्कोर", scoreAI: "AI स्कोर", risk: "जोखिम {n}/100",
     noteChecking: "AI दोबारा जाँच रहा है…", noteUnavailable: "AI उपलब्ध नहीं, केवल नियमों का परिणाम",
     deltaRaised: "AI ने जोखिम बढ़ाया: {a} → {b}", deltaAgrees: "AI नियमों से सहमत है",
+    wake: "सर्वर चालू हो रहा है… पहली बार में एक मिनट तक लग सकता है।",
     footer: "पैसे चले गए? तुरंत <b>1930</b> पर कॉल करें और <b>cybercrime.gov.in</b> पर शिकायत करें। Satark आपके संदेश सहेजता नहीं है। यह दूसरी राय है, गारंटी नहीं।",
   },
   mr: {
@@ -197,6 +205,7 @@ const I18N = {
     scoreRules: "नियम स्कोअर", scoreAI: "AI स्कोअर", risk: "धोका {n}/100",
     noteChecking: "AI पुन्हा तपासत आहे…", noteUnavailable: "AI उपलब्ध नाही, फक्त नियमांवर आधारित निकाल",
     deltaRaised: "AI ने धोका वाढवला: {a} → {b}", deltaAgrees: "AI नियमांशी सहमत आहे",
+    wake: "सर्व्हर सुरू होत आहे… पहिल्यांदा एक मिनिटापर्यंत वेळ लागू शकतो.",
     footer: "पैसे गेले? ताबडतोब <b>1930</b> वर कॉल करा आणि <b>cybercrime.gov.in</b> वर तक्रार करा. Satark तुमचे संदेश साठवत नाही. हे दुसरे मत आहे, हमी नाही.",
   },
 };
@@ -225,7 +234,20 @@ function applyLang() {
   $("hSteps").textContent = t("hSteps");
   $("footer").innerHTML = t("footer");
   if (!$("go").disabled) $("go").textContent = t("check");
+  if (!$("wake").hidden) $("wake").textContent = t("wake");
   if (lastResult) { render(lastResult); setNote(noteState.key, noteState.kind); }   // re-title an on-screen result
+}
+
+// Free hosting sleeps when idle and takes up to a minute to wake. If a request we are waiting on is still
+// pending after a few seconds, say so instead of looking frozen. One banner serves every watched request.
+const WAKE_AFTER_MS = window.SATARK_WAKE_MS ?? 3000;
+let watching = 0;
+function watch(promise) {
+  watching++;
+  const timer = setTimeout(() => { if (watching > 0) { $("wake").textContent = t("wake"); $("wake").hidden = false; } }, WAKE_AFTER_MS);
+  const done = () => { clearTimeout(timer); if (--watching === 0) $("wake").hidden = true; };
+  promise.then(done, done);
+  return promise;
 }
 
 let lastResult = null;
@@ -355,7 +377,7 @@ $("form").onsubmit = async e => {
   let first = null;
   try {
     if (!imageOnly) {
-      first = await callCheck(body("false"));          // rules only: comes back at once
+      first = await watch(callCheck(body("false")));   // rules only: comes back at once (unless the server is asleep)
       if (mine !== checkToken) return;
       render(first);
       setNote("noteChecking", "pending");
@@ -394,6 +416,10 @@ $("form").onsubmit = async e => {
 };
 
 applyLang();
+
+// Ping the server as soon as the page opens: this wakes a sleeping host while the person reads and types.
+watch(fetch((window.SATARK_API || "") + "/api/health",
+  typeof AbortSignal !== "undefined" && AbortSignal.timeout ? { signal: AbortSignal.timeout(90000) } : {})).catch(() => {});
 </script>
 </body>
 </html>
