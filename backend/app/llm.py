@@ -102,10 +102,12 @@ def _log_failure(provider: str, model: str, status: int | str, error: str, attem
                 provider, model, status, error, attempt, attempts)
 
 
-async def _complete(client: httpx.AsyncClient, base: str, headers: dict, payload: dict) -> str:
-    """POST one chat completion with retries. Returns the reply text or raises LLMError."""
+async def _complete(client: httpx.AsyncClient, base: str, headers: dict, payload: dict,
+                    delays: tuple[float, ...] = RETRY_DELAYS) -> str:
+    """POST one chat completion, retrying transient errors after each wait in `delays`.
+    Returns the reply text or raises LLMError."""
     provider, model = urlparse(base).netloc or "unknown", payload["model"]
-    attempts = len(RETRY_DELAYS) + 1
+    attempts = len(delays) + 1
     for attempt in range(1, attempts + 1):
         try:
             r = await client.post(f"{base}/chat/completions", json=payload, headers=headers)
@@ -117,7 +119,7 @@ async def _complete(client: httpx.AsyncClient, base: str, headers: dict, payload
             reason = "rate_limited" if r.status_code == 429 else "unavailable"
             _log_failure(provider, model, r.status_code, reason, attempt, attempts)
             if attempt < attempts:
-                await _sleep(RETRY_DELAYS[attempt - 1])
+                await _sleep(delays[attempt - 1])
                 continue
             raise LLMError(reason)
         if r.status_code >= 400:  # bad key, bad model name, ...: retrying won't help
@@ -130,6 +132,16 @@ async def _complete(client: httpx.AsyncClient, base: str, headers: dict, payload
             _log_failure(provider, model, r.status_code, type(e).__name__, attempt, attempts)
             raise LLMError("bad_response") from e
     raise LLMError("unavailable")  # pragma: no cover (loop always returns or raises)
+
+
+async def _ask(client: httpx.AsyncClient, base: str, headers: dict, payload: dict,
+               delays: tuple[float, ...]) -> dict:
+    """One model: call it (with retries), parse the JSON. Raises LLMError."""
+    parsed = _parse_json(await _complete(client, base, headers, payload, delays))
+    if parsed is None:
+        _log_failure(urlparse(base).netloc or "unknown", payload["model"], 200, "unparseable_json", 1, 1)
+        raise LLMError("bad_response")
+    return parsed
 
 
 async def analyse(text: str, lang: str, rule_hints: list[dict],
@@ -167,11 +179,21 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
     base = os.getenv("LLM_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
     headers = {"Authorization": f"Bearer {os.environ['LLM_API_KEY']}"}
 
+    # Primary model with full retries; then, if set, the fallback model (same endpoint and key) once.
+    models = [payload["model"]]
+    fallback = os.getenv("LLM_FALLBACK_MODEL", "").strip()
+    if fallback and fallback != models[0]:
+        models.append(fallback)
+
+    first_error: LLMError | None = None
     async with _client() as client:
-        raw = await _complete(client, base, headers, payload)
-    parsed = _parse_json(raw)
-    if parsed is None:
-        log.warning("LLM call failed: provider=%s model=%s status=200 error=unparseable_json",
-                    urlparse(base).netloc or "unknown", payload["model"])
-        raise LLMError("bad_response")
-    return parsed
+        for i, model in enumerate(models):
+            payload["model"] = model
+            try:
+                return await _ask(client, base, headers, payload, RETRY_DELAYS if i == 0 else ())
+            except LLMError as e:
+                first_error = first_error or e
+                if i + 1 < len(models):
+                    log.warning("LLM falling back: provider=%s from=%s to=%s reason=%s",
+                                urlparse(base).netloc or "unknown", model, models[i + 1], e.reason)
+    raise first_error  # the primary model's failure is the one worth reporting

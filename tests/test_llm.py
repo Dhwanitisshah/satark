@@ -133,6 +133,48 @@ def test_failure_log_has_provider_model_status_but_no_secrets(wire, caplog):
     assert KEY not in logged and "SBI" not in logged and "KYC" not in logged
 
 
+# --- fallback model --------------------------------------------------------------------------
+
+def model_of(request: httpx.Request) -> str:
+    return json.loads(request.content)["model"]
+
+
+def test_fallback_model_used_after_primary_exhausts_retries(wire, monkeypatch):
+    monkeypatch.setenv("LLM_FALLBACK_MODEL", "backup-model")
+    calls, sleeps = wire(lambda r: httpx.Response(503) if model_of(r) == "test-model" else chat(json.dumps(GOOD)))
+    assert run_analyse()["risk"] == 80
+    assert [model_of(c) for c in calls] == ["test-model"] * 3 + ["backup-model"]
+    assert sleeps == [2.0, 5.0]
+
+
+def test_fallback_gets_one_attempt_only(wire, monkeypatch):
+    monkeypatch.setenv("LLM_FALLBACK_MODEL", "backup-model")
+    calls, sleeps = wire(lambda r: httpx.Response(429) if model_of(r) == "test-model" else httpx.Response(503))
+    assert failure_reason() == "rate_limited"  # the primary's failure is the one reported
+    assert [model_of(c) for c in calls] == ["test-model"] * 3 + ["backup-model"]
+
+
+def test_fallback_used_when_primary_reply_is_unreadable(wire, monkeypatch):
+    monkeypatch.setenv("LLM_FALLBACK_MODEL", "backup-model")
+    calls, _ = wire(lambda r: chat("no json here") if model_of(r) == "test-model" else chat(json.dumps(GOOD)))
+    assert run_analyse()["risk"] == 80
+    assert [model_of(c) for c in calls] == ["test-model", "backup-model"]
+
+
+def test_fallback_not_called_when_primary_works(wire, monkeypatch):
+    monkeypatch.setenv("LLM_FALLBACK_MODEL", "backup-model")
+    calls, _ = wire(lambda r: chat(json.dumps(GOOD)))
+    run_analyse()
+    assert [model_of(c) for c in calls] == ["test-model"]
+
+
+def test_fallback_same_as_primary_is_ignored(wire, monkeypatch):
+    monkeypatch.setenv("LLM_FALLBACK_MODEL", "test-model")
+    calls, _ = wire(lambda r: httpx.Response(503))
+    assert failure_reason() == "unavailable"
+    assert len(calls) == 3
+
+
 # --- through the API -------------------------------------------------------------------------
 
 client = TestClient(app)
