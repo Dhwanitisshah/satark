@@ -62,8 +62,14 @@ service's Build Filter lists them (`backend/**`, `frontend/**`, `requirements.tx
 dashboard service must be set by hand). Otherwise trigger a deploy through the Render MCP. `PYTHON_VERSION` was not applied, so it runs on Python 3.14.3 (works). `.mcp.json` holds
 the Render API key and is gitignored; never commit it.
 
-Not done: translated "what to do now" steps (still a fixed English playbook), native-speaker review of the hi/mr
-strings, demo video, Devpost text.
+**Translations are drafted but NOT deployed.** The Hindi/Marathi playbook, headlines and red-flag text are in
+`actions.py`, `verdict.py` and `rules/translations.py`, with the review sheet in `docs/translations_review.md`
+(regenerate with `python scripts/make_translation_review.py`; a test fails if it is stale). They are committed locally
+on `main` but must not be pushed (a push to `backend/` auto-deploys them) until the user says "translations
+approved". Push earlier commits individually (`git push origin <sha>:main`). After approval, update the README's
+Hindi/Marathi limitation (the steps are no longer English-only).
+
+Not done: user review of the translations, demo video, Devpost text.
 
 Samples: `rules_blind: true` marks scams with no keyword the rules know. They exist to show what the LLM adds, so
 **never add regexes to make them pass**; a test keeps their rule score at 0. The known-script results are in-sample
