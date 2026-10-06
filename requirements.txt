@@ -5,7 +5,8 @@ python-multipart>=0.0.9
 python-dotenv>=1.0
 # Optional: local screenshot OCR (also needs the Tesseract binary installed)
 # pytesseract>=0.3.10
-# pillow>=10.0
+
 
 # dev
 pytest>=8.0
+pillow>=10.0   # scripts/make_screenshots.py renders the test screenshots
