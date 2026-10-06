@@ -189,6 +189,280 @@ def test_system_prompt_calibrates_bank_alerts_and_keeps_keywordless_scams_in_vie
     assert "no obvious keywords" in system and "judge the pattern" in system
 
 
+# --- per-call timing and logs ----------------------------------------------------------------
+
+def with_usage(reasoning=None):
+    usage = {"prompt_tokens": 486, "completion_tokens": 219, "total_tokens": 705}
+    if reasoning is not None:
+        usage["completion_tokens_details"] = {"reasoning_tokens": reasoning}
+    return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(GOOD)}}], "usage": usage})
+
+
+def test_the_answer_carries_its_timing_and_token_counts(wire):
+    wire(lambda r: with_usage(reasoning=247))
+    t = run_analyse()["timing"]
+    assert t["provider"] == "llm.example.test" and t["model"] == "test-model" and t["attempt"] == 1
+    assert t["total_ms"] >= 0 and t["request_ms"] >= t["total_ms"] - 5
+    assert (t["prompt_tokens"], t["completion_tokens"], t["reasoning_tokens"]) == (486, 219, 247)
+    assert set(t) >= {"connect_ms", "tls_ms", "ttfb_ms", "reused"}      # None here: a mock has no real socket
+
+
+def test_missing_usage_is_none_not_an_error(wire):
+    wire(lambda r: chat(json.dumps(GOOD)))
+    t = run_analyse()["timing"]
+    assert t["prompt_tokens"] is None and t["completion_tokens"] is None and t["reasoning_tokens"] is None
+
+
+def test_timing_names_the_model_that_actually_answered(wire, cross):
+    wire(primary_down_backup_up)
+    t = run_analyse()["timing"]
+    assert t["provider"] == "groq" and t["model"] == "backup-model" and t["attempt"] == 2
+
+
+def test_each_successful_call_is_logged_with_its_numbers_and_nothing_secret(wire, caplog):
+    wire(lambda r: with_usage(reasoning=0))
+    with caplog.at_level(logging.INFO, logger="satark.llm"):
+        run_analyse()
+    line = next(r.getMessage() for r in caplog.records if "LLM call ok" in r.getMessage())
+    for part in ("provider=llm.example.test", "model=test-model", "status=200", "connect=", "tls=", "ttfb=", "total=",
+                 "prompt_tokens=486", "completion_tokens=219", "reasoning_tokens=0", "reused="):
+        assert part in line
+    assert KEY not in caplog.text and "SBI" not in caplog.text and "KYC" not in caplog.text and "Bearer" not in caplog.text
+
+
+def test_failures_log_how_long_they_took(wire, caplog):
+    wire(lambda r: httpx.Response(401))
+    with caplog.at_level(logging.WARNING, logger="satark.llm"):
+        failure_reason()
+    assert "status=401" in caplog.text and "took=" in caplog.text and "ms" in caplog.text
+
+
+def test_the_trace_hook_turns_httpcore_events_into_phases():
+    trace = llm._Trace()
+    clock = iter([0.0, 0.050, 0.060, 0.200, 0.210, 6.900])      # connect 50ms, TLS 140ms, then a 6.69s wait
+    events = ["connection.connect_tcp.started", "connection.connect_tcp.complete", "connection.start_tls.started",
+              "connection.start_tls.complete", "http11.send_request_body.complete",
+              "http11.receive_response_headers.complete"]
+    import unittest.mock as mock
+    with mock.patch.object(llm.time, "perf_counter", side_effect=lambda: next(clock)):
+        for e in events:
+            asyncio.run(trace(e, {}))
+    s = trace.summary()
+    assert (s["connect_ms"], s["tls_ms"], s["ttfb_ms"], s["reused"]) == (50, 140, 6690, False)
+
+
+def test_a_reused_connection_is_reported_as_reused():
+    trace = llm._Trace()
+    asyncio.run(trace("http11.send_request_body.complete", {}))
+    asyncio.run(trace("http11.receive_response_headers.complete", {}))
+    s = trace.summary()
+    assert s["reused"] is True and s["connect_ms"] is None and s["tls_ms"] is None and s["ttfb_ms"] is not None
+
+
+def test_info_lines_become_visible_once_logging_is_configured():
+    logger = logging.getLogger("satark")
+    before = list(logger.handlers)
+    try:
+        llm.configure_logging()
+        llm.configure_logging()          # idempotent: no duplicate handler
+        assert logger.level == logging.INFO and len(logger.handlers) == len(before) + (0 if before else 1)
+    finally:
+        for h in list(logger.handlers):
+            if h not in before:
+                logger.removeHandler(h)
+        logger.setLevel(logging.NOTSET)
+
+
+# --- failure diagnostics: what went wrong with each attempt ------------------------------------
+
+def test_every_failed_attempt_is_reported_with_status_and_duration(wire, cross):
+    calls, _ = wire(lambda r: httpx.Response(403) if by_host(r) == "llm.example.test" else httpx.Response(503))
+    with pytest.raises(llm.LLMError) as exc:
+        run_analyse()
+    primary, backup = exc.value.attempts
+    assert (primary["provider"], primary["model"], primary["reason"], primary["status"]) == (
+        "llm.example.test", "test-model", "unavailable", 403)
+    assert (backup["provider"], backup["model"], backup["status"]) == ("groq", "backup-model", 503)
+    assert all(isinstance(a["took_ms"], int) and a["took_ms"] >= 0 for a in exc.value.attempts)
+    assert set(primary) == {"provider", "model", "reason", "status", "took_ms"}     # nothing that could hold a secret
+
+
+def test_network_errors_and_timeouts_are_named(wire, monkeypatch):
+    def boom(request):
+        raise httpx.ConnectError("no route", request=request)
+
+    wire(boom)
+    with pytest.raises(llm.LLMError) as exc:
+        run_analyse()
+    assert exc.value.attempts[0]["status"] == "ConnectError"
+
+    llm.clear_cache()
+    monkeypatch.setenv("LLM_TOTAL_TIMEOUT", "0.1")
+
+    async def slow(request):
+        await asyncio.sleep(2)
+        return chat(json.dumps(GOOD))
+
+    monkeypatch.setattr(llm, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(slow)))
+    with pytest.raises(llm.LLMError) as exc:
+        run_analyse()
+    assert exc.value.attempts[0]["status"] == "timeout"
+
+
+def test_a_success_after_a_failure_still_reports_the_failure(wire, cross):
+    wire(primary_down_backup_up)
+    t = run_analyse()["timing"]
+    assert t["attempt"] == 2 and len(t["failed_attempts"]) == 1
+    assert t["failed_attempts"][0]["status"] == 503 and t["failed_attempts"][0]["provider"] == "llm.example.test"
+
+
+def test_a_clean_success_has_no_failed_attempts(wire):
+    wire(lambda r: chat(json.dumps(GOOD)))
+    assert run_analyse()["timing"]["failed_attempts"] == []
+
+
+# --- one shared client, a warm-up, and the IPv4 option ---------------------------------------------
+
+def count_clients(monkeypatch) -> list[int]:
+    """Count how many HTTP clients get built. Call it AFTER wire(), which installs the factory it wraps."""
+    made: list[int] = []
+    orig = llm._client
+    monkeypatch.setattr(llm, "_client", lambda: made.append(1) or orig())
+    return made
+
+
+def test_the_shared_client_is_built_once_and_reused_for_every_check(monkeypatch, wire):
+    calls, _ = wire(lambda r: chat(json.dumps(GOOD)))
+    counted = count_clients(monkeypatch)
+
+    async def scenario():
+        await llm.startup()
+        try:
+            for i in range(3):
+                await llm.analyse(f"{MESSAGE} {i}", "en", [])
+            assert llm._shared is not None and not llm._shared.is_closed
+        finally:
+            await llm.shutdown()
+
+    asyncio.run(scenario())
+    assert len(counted) == 1                         # one client for the whole run...
+    assert len([c for c in calls if c.method == "POST"]) == 3
+    assert llm._shared is None                       # ...closed again at shutdown
+
+
+def test_without_startup_each_check_builds_a_short_lived_client(monkeypatch, wire):
+    wire(lambda r: chat(json.dumps(GOOD)))
+    counted = count_clients(monkeypatch)
+    for i in range(3):
+        asyncio.run(llm.analyse(f"{MESSAGE} {i}", "en", []))
+    assert len(counted) == 3                         # scripts and the eval keep working, just without reuse
+
+
+def test_startup_does_nothing_when_no_llm_is_configured():
+    asyncio.run(llm.startup())
+    assert llm._shared is None and llm._warm_task is None
+    asyncio.run(llm.shutdown())                      # and shutdown is safe with nothing to close
+
+
+def test_shutdown_closes_the_client_and_is_idempotent(wire):
+    wire(lambda r: chat(json.dumps(GOOD)))
+
+    async def scenario():
+        await llm.startup()
+        client = llm._shared
+        await llm.shutdown()
+        await llm.shutdown()
+        return client
+
+    assert asyncio.run(scenario()).is_closed
+
+
+@pytest.fixture
+def fake_dns(monkeypatch):
+    import socket
+
+    async def resolve(host):
+        return [(socket.AF_INET, 1, 6, "", (host, 443)), (socket.AF_INET, 1, 6, "", (host, 443)),
+                (socket.AF_INET6, 1, 6, "", (host, 443, 0, 0))]
+
+    monkeypatch.setattr(llm, "_resolve", resolve)
+
+
+def test_warm_up_makes_one_cheap_request_to_each_provider(wire, cross, fake_dns, caplog):
+    calls, _ = wire(lambda r: httpx.Response(200, json={"data": []}))
+
+    async def scenario():
+        await llm.startup()
+        await llm._warm_task
+        await llm.shutdown()
+
+    with caplog.at_level(logging.INFO, logger="satark.llm"):
+        asyncio.run(scenario())
+    assert [(c.method, by_host(c), c.url.path.split("/")[-1]) for c in calls] == [
+        ("GET", "llm.example.test", "models"), ("GET", "api.groq.com", "models")]
+    assert calls[0].headers["authorization"] == f"Bearer {KEY}"
+    assert calls[1].headers["authorization"] == f"Bearer {BACKUP_KEY}"          # each provider gets only its own key
+    line = next(r.getMessage() for r in caplog.records if "warm-up" in r.getMessage() and "groq" in r.getMessage())
+    assert "dns=" in line and "ipv4=2" in line and "ipv6=1" in line and "total=" in line
+    assert KEY not in caplog.text and BACKUP_KEY not in caplog.text
+
+
+@pytest.mark.parametrize("failure", ["connect", "dns", "http500"])
+def test_a_failing_warm_up_never_breaks_startup(wire, cross, fake_dns, monkeypatch, caplog, failure):
+    import socket
+
+    def handler(request):
+        if failure == "connect":
+            raise httpx.ConnectError("down", request=request)
+        return httpx.Response(500)
+
+    wire(handler)
+    if failure == "dns":
+        async def broken(host):
+            raise socket.gaierror("name not known")
+
+        monkeypatch.setattr(llm, "_resolve", broken)
+
+    async def scenario():
+        await llm.startup()
+        await llm._warm_task          # finishes normally: the failure was logged, not raised
+        await llm.shutdown()
+
+    with caplog.at_level(logging.INFO, logger="satark.llm"):
+        asyncio.run(scenario())
+    if failure != "http500":
+        assert "warm-up failed" in caplog.text
+
+
+def test_the_app_starts_and_stops_the_shared_client(wire, fake_dns):
+    wire(lambda r: httpx.Response(200, json={"data": []}))
+    with TestClient(app) as c:
+        assert llm._shared is not None
+        assert c.get("/api/health").json()["ok"] is True
+    assert llm._shared is None
+
+
+def test_the_client_is_tuned_for_keep_alive_and_has_a_short_connect_timeout():
+    c = llm._make_client()
+    assert c.timeout.connect == 10.0 and c.timeout.read == 40.0
+
+
+def test_ipv4_only_is_opt_in(monkeypatch):
+    seen = {}
+
+    class Recorder(httpx.AsyncHTTPTransport):
+        def __init__(self, *a, **kw):
+            seen.update(kw)
+            super().__init__(*a, **kw)
+
+    monkeypatch.setattr(llm.httpx, "AsyncHTTPTransport", Recorder)
+    llm._make_client()
+    assert seen == {}                                              # off by default: normal dual-stack behaviour
+    monkeypatch.setenv("LLM_FORCE_IPV4", "true")
+    llm._make_client()
+    assert seen["local_address"] == "0.0.0.0" and seen["limits"].keepalive_expiry == 60.0
+
+
 # --- cache -----------------------------------------------------------------------------------
 
 def ask(text=MESSAGE, lang="en", image=None):
@@ -198,7 +472,9 @@ def ask(text=MESSAGE, lang="en", image=None):
 def test_repeat_check_is_served_from_cache(wire):
     calls, _ = wire(lambda r: chat(json.dumps(GOOD)))
     first, second = ask(), ask()
-    assert first == second and len(calls) == 1
+    assert len(calls) == 1
+    assert {k: v for k, v in first.items() if k != "timing"} == {k: v for k, v in second.items() if k != "timing"}
+    assert second["timing"] == {"cached": True} and first["timing"]["total_ms"] >= 0   # a hit says it was a hit
 
 
 def test_cache_is_keyed_on_text_lang_and_model(wire, monkeypatch):
@@ -620,6 +896,47 @@ def test_api_reports_which_provider_answered(monkeypatch):
     monkeypatch.setattr(llm, "analyse", ok)
     body = TestClient(app).post("/api/check", data={"text": MESSAGE}).json()
     assert body["ai_provider"] == "groq"
+
+
+def test_api_exposes_the_timing_of_the_call_that_answered(monkeypatch):
+    timing = {"provider": "groq", "model": "m", "connect_ms": 40, "tls_ms": 90, "ttfb_ms": 700, "total_ms": 900,
+              "reused": False, "completion_tokens": 219}
+
+    async def ok(*args, **kwargs):
+        return {**GOOD, "provider": "groq", "timing": timing}
+
+    monkeypatch.setattr(llm, "analyse", ok)
+    body = TestClient(app).post("/api/check", data={"text": MESSAGE}).json()
+    assert body["ai_timing"] == timing
+
+
+def test_api_reports_each_failed_attempt_when_the_ai_is_unavailable(monkeypatch):
+    attempts = [{"provider": "groq", "model": "m", "reason": "unavailable", "status": 403, "took_ms": 120},
+                {"provider": "gemini", "model": "g", "reason": "unavailable", "status": 503, "took_ms": 6500}]
+
+    async def failing(*args, **kwargs):
+        err = llm.LLMError("unavailable", 403, 120)
+        err.attempts = attempts
+        raise err
+
+    monkeypatch.setattr(llm, "analyse", failing)
+    body = TestClient(app).post("/api/check", data={"text": MESSAGE + " http://sbi-kyc.xyz"}).json()
+    assert body["ai_error"] == "unavailable" and body["ai_attempts"] == attempts
+    assert body["verdict"] == "scam"                       # the rules still answered
+
+
+def test_api_has_no_attempts_when_ai_worked_or_was_not_asked(monkeypatch):
+    async def ok(*args, **kwargs):
+        return dict(GOOD)
+
+    monkeypatch.setattr(llm, "analyse", ok)
+    assert "ai_attempts" not in TestClient(app).post("/api/check", data={"text": MESSAGE}).json()
+    assert "ai_attempts" not in TestClient(app).post("/api/check", data={"text": MESSAGE, "ai": "false"}).json()
+
+
+def test_api_ai_timing_is_null_without_ai():
+    body = TestClient(app).post("/api/check", data={"text": "Are we meeting at 8?"}).json()
+    assert body["ai_timing"] is None
 
 
 def test_api_ai_provider_is_null_without_ai():

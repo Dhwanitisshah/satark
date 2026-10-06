@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -24,7 +25,18 @@ MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_TEXT_CHARS = 5000
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 
-app = FastAPI(title="Satark", version="0.1.0", description="India-first AI scam checker")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # One long-lived HTTP client (keep-alive, so TLS connections are reused) plus a warm-up request to each
+    # AI provider, instead of building a client and opening connections on every check.
+    await llm.startup()
+    try:
+        yield
+    finally:
+        await llm.shutdown()
+
+
+app = FastAPI(title="Satark", version="0.1.0", description="India-first AI scam checker", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
@@ -81,12 +93,12 @@ async def check(
             )
 
     rules = run_rules(text)
-    judgement, ai_error = None, None
+    judgement, ai_error, ai_attempts = None, None, None
     if ai:
         try:
             judgement = await llm.analyse(text, lang, rules["signals"], img_bytes, img_mime)
         except llm.LLMError as e:  # rules still answer; tell the client why the AI part is missing
-            ai_error = e.reason
+            ai_error, ai_attempts = e.reason, e.attempts
 
     # A vision model may have read the image for us; re-run rules on that text.
     if not text and judgement and judgement.get("extracted_text"):
@@ -96,7 +108,10 @@ async def check(
     if not text:  # screenshot we couldn't read: "no scam signs" would be a false all-clear
         raise HTTPException(503, "Couldn't read that screenshot right now. Try again, or paste the message text.")
 
-    return fuse(text, rules, judgement, ai_error, lang)
+    out = fuse(text, rules, judgement, ai_error, lang)
+    if ai_attempts:  # one entry per failed attempt: provider, model, reason, HTTP status or error name, milliseconds
+        out["ai_attempts"] = ai_attempts
+    return out
 
 
 if FRONTEND.exists():

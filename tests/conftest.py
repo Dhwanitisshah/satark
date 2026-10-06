@@ -16,7 +16,8 @@ os.environ["LLM_FALLBACK_API_KEY"] = ""
 # Everything else the LLM layer reads from the environment (see .env.example).
 LLM_ENV_VARS = ["LLM_BASE_URL", "LLM_MODEL", "LLM_VISION", "LLM_FALLBACK_MODEL", "LLM_FALLBACK_BASE_URL",
                 "LLM_FALLBACK_API_KEY", "LLM_FALLBACK_VISION", "LLM_TIMEOUT", "LLM_TOTAL_TIMEOUT", "LLM_TOTAL_TIMEOUT_VISION",
-                "LLM_PRIMARY_TIMEOUT", "LLM_MAX_TOKENS"]
+                "LLM_PRIMARY_TIMEOUT", "LLM_MAX_TOKENS", "LLM_FORCE_IPV4", "LLM_CONNECT_TIMEOUT",
+                "LLM_KEEPALIVE_SECONDS"]
 
 
 @pytest.fixture(autouse=True)
@@ -28,3 +29,5 @@ def no_real_llm(monkeypatch):
     for name in LLM_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
     llm.clear_cache()  # a cached answer from one test must not leak into the next
+    monkeypatch.setattr(llm, "_shared", None)        # no shared client or warm-up task carried between tests
+    monkeypatch.setattr(llm, "_warm_task", None)

@@ -7,13 +7,17 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import copy
 import hashlib
 import json
 import logging
 import os
 import re
+import socket
+import time
 from collections import OrderedDict
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from urllib.parse import urlparse
 
@@ -79,9 +83,12 @@ class LLMError(Exception):
     """The LLM was configured but gave us nothing usable. `reason` is safe to show the client:
     "rate_limited" | "unavailable" | "bad_response"."""
 
-    def __init__(self, reason: str):
+    def __init__(self, reason: str, status: int | str | None = None, took_ms: int | None = None):
         super().__init__(reason)
         self.reason = reason
+        self.status = status      # HTTP status, or an error name such as "ConnectError" or "timeout"
+        self.took_ms = took_ms
+        self.attempts: list[dict] = []   # every failed attempt of the request, filled in by analyse()
 
 
 def is_configured() -> bool:
@@ -116,11 +123,77 @@ def _cache_key(text: str, lang: str, model: str, image: bytes | None) -> tuple[s
     return digest.hexdigest(), lang, model
 
 
+def _make_client() -> httpx.AsyncClient:
+    """An HTTP client tuned for talking to the same two providers all day: keep-alive connections are held for
+    a minute so the next check skips DNS, TCP and the TLS handshake."""
+    timeout = httpx.Timeout(float(os.getenv("LLM_TIMEOUT", "40")), connect=float(os.getenv("LLM_CONNECT_TIMEOUT", "10")))
+    limits = httpx.Limits(max_connections=20, max_keepalive_connections=10,
+                          keepalive_expiry=float(os.getenv("LLM_KEEPALIVE_SECONDS", "60")))
+    if _flag("LLM_FORCE_IPV4"):
+        # Opt-in. Binding the local side to 0.0.0.0 makes the socket IPv4-only. A host that publishes IPv6
+        # addresses but has no working IPv6 route can stall each new connection on the dead address before it
+        # falls back to IPv4. Turn this on only if the logged connect time shows that stall.
+        return httpx.AsyncClient(timeout=timeout,
+                                 transport=httpx.AsyncHTTPTransport(limits=limits, local_address="0.0.0.0"))
+    return httpx.AsyncClient(timeout=timeout, limits=limits)
+
+
 def _client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=float(os.getenv("LLM_TIMEOUT", "40")))
+    return _make_client()
+
+
+# The one long-lived client, created at app startup and closed at shutdown (see startup()/shutdown()).
+# Without it (scripts, the eval, tests) each call builds a short-lived client instead.
+_shared: httpx.AsyncClient | None = None
+_warm_task: asyncio.Task | None = None
+
+
+@asynccontextmanager
+async def _use_client():
+    if _shared is not None:
+        yield _shared  # never closed per request: that is the point
+    else:
+        async with _client() as client:
+            yield client
 
 
 _sleep = asyncio.sleep  # indirection so tests can skip the backoff
+
+
+class _Trace:
+    """Collects httpcore's connection events for one request, so a slow call can be split into DNS+connect,
+    TLS and time-to-first-byte. Holds only timestamps: never a URL, header, key or message text."""
+
+    def __init__(self) -> None:
+        self.at: dict[str, float] = {}
+
+    async def __call__(self, event: str, info: dict) -> None:
+        self.at.setdefault(event, time.perf_counter())
+
+    def _ms(self, start: str, end: str) -> int | None:
+        if start in self.at and end in self.at:
+            return round((self.at[end] - self.at[start]) * 1000)
+        return None
+
+    def summary(self) -> dict:
+        return {
+            # connect_tcp covers resolving the name AND opening the socket (anyio does both); None = pooled connection reused
+            "connect_ms": self._ms("connection.connect_tcp.started", "connection.connect_tcp.complete"),
+            "tls_ms": self._ms("connection.start_tls.started", "connection.start_tls.complete"),
+            # request fully sent -> response headers back: the provider's think time plus network round trip
+            "ttfb_ms": self._ms("http11.send_request_body.complete", "http11.receive_response_headers.complete"),
+            "reused": "connection.connect_tcp.started" not in self.at,
+        }
+
+
+def configure_logging() -> None:
+    """Make INFO lines from this module visible (Python only shows WARNING+ for a logger nobody configured)."""
+    logger = logging.getLogger("satark")
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+        logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 
 def _strip_fences(raw: str) -> str:
@@ -153,44 +226,76 @@ def _parse_json(raw: str) -> dict | None:
     return data
 
 
-def _log_failure(provider: str, model: str, status: int | str, error: str, attempt: int, attempts: int) -> None:
+def _log_failure(provider: str, model: str, status: int | str, error: str, attempt: int, attempts: int,
+                 took_ms: int | None = None) -> None:
     # Deliberately no key, URL, request body or message text here.
-    log.warning("LLM call failed: provider=%s model=%s status=%s error=%s attempt=%d/%d",
-                provider, model, status, error, attempt, attempts)
+    log.warning("LLM call failed: provider=%s model=%s status=%s error=%s attempt=%d/%d took=%sms",
+                provider, model, status, error, attempt, attempts, "-" if took_ms is None else took_ms)
+
+
+@dataclass
+class Reply:
+    content: str
+    timing: dict  # connect_ms, tls_ms, ttfb_ms, total_ms, reused, prompt_tokens, completion_tokens, reasoning_tokens
+
+
+def _tokens(body: dict) -> dict:
+    """Token counts from an OpenAI-style `usage` block; None where the provider doesn't say."""
+    usage = body.get("usage") if isinstance(body, dict) else None
+    usage = usage if isinstance(usage, dict) else {}
+    details = usage.get("completion_tokens_details")
+    details = details if isinstance(details, dict) else {}
+    return {"prompt_tokens": usage.get("prompt_tokens"), "completion_tokens": usage.get("completion_tokens"),
+            "reasoning_tokens": details.get("reasoning_tokens")}
 
 
 async def _complete(client: httpx.AsyncClient, base: str, headers: dict, payload: dict,
-                    delays: tuple[float, ...] = RETRY_DELAYS) -> str:
+                    delays: tuple[float, ...] = RETRY_DELAYS) -> Reply:
     """POST one chat completion, retrying transient errors after each wait in `delays`.
-    Returns the reply text or raises LLMError."""
-    provider, model = urlparse(base).netloc or "unknown", payload["model"]
+    Returns the reply text with its timing, or raises LLMError."""
+    provider, model = provider_label(base), payload["model"]
     attempts = len(delays) + 1
     for attempt in range(1, attempts + 1):
+        trace, started = _Trace(), time.perf_counter()
         try:
-            r = await client.post(f"{base}/chat/completions", json=payload, headers=headers)
+            r = await client.post(f"{base}/chat/completions", json=payload, headers=headers,
+                                  extensions={"trace": trace})
         except httpx.HTTPError as e:
-            _log_failure(provider, model, "-", type(e).__name__, attempt, attempts)
-            raise LLMError("unavailable") from e
+            took = _since(started)
+            _log_failure(provider, model, "-", type(e).__name__, attempt, attempts, took)
+            raise LLMError("unavailable", type(e).__name__, took) from e
+        took = _since(started)
 
         if r.status_code == 429:
-            _log_failure(provider, model, 429, "rate_limited", attempt, attempts)
-            raise LLMError("rate_limited")
+            _log_failure(provider, model, 429, "rate_limited", attempt, attempts, took)
+            raise LLMError("rate_limited", 429, took)
         if r.status_code in RETRY_STATUSES:
-            _log_failure(provider, model, r.status_code, "unavailable", attempt, attempts)
+            _log_failure(provider, model, r.status_code, "unavailable", attempt, attempts, took)
             if attempt < attempts:
                 await _sleep(delays[attempt - 1])
                 continue
-            raise LLMError("unavailable")
+            raise LLMError("unavailable", r.status_code, took)
         if r.status_code >= 400:  # bad key, bad model name, ...: retrying won't help
-            _log_failure(provider, model, r.status_code, "http_error", attempt, attempts)
-            raise LLMError("unavailable")
+            _log_failure(provider, model, r.status_code, "http_error", attempt, attempts, took)
+            raise LLMError("unavailable", r.status_code, took)
 
         try:
-            return r.json()["choices"][0]["message"]["content"] or ""
+            body = r.json()
+            content = body["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, TypeError, ValueError) as e:
-            _log_failure(provider, model, r.status_code, type(e).__name__, attempt, attempts)
-            raise LLMError("bad_response") from e
+            _log_failure(provider, model, r.status_code, type(e).__name__, attempt, attempts, took)
+            raise LLMError("bad_response", r.status_code, took) from e
+        timing = {**trace.summary(), "total_ms": took, **_tokens(body)}
+        log.info("LLM call ok: provider=%s model=%s status=%s connect=%sms tls=%sms ttfb=%sms total=%sms reused=%s "
+                 "prompt_tokens=%s completion_tokens=%s reasoning_tokens=%s",
+                 provider, model, r.status_code, timing["connect_ms"], timing["tls_ms"], timing["ttfb_ms"], took,
+                 timing["reused"], timing["prompt_tokens"], timing["completion_tokens"], timing["reasoning_tokens"])
+        return Reply(content, timing)
     raise LLMError("unavailable")  # pragma: no cover (loop always returns or raises)
+
+
+def _since(started: float) -> int:
+    return round((time.perf_counter() - started) * 1000)
 
 PROVIDER_LABELS = {
     "generativelanguage.googleapis.com": "gemini",
@@ -252,12 +357,65 @@ async def _ask(client: httpx.AsyncClient, attempt: Attempt, messages: list[dict]
         "messages": messages,
     }
     headers = {"Authorization": f"Bearer {attempt.api_key}"}
-    parsed = _parse_json(await _complete(client, attempt.base, headers, payload, attempt.delays))
+    reply = await _complete(client, attempt.base, headers, payload, attempt.delays)
+    parsed = _parse_json(reply.content)
     if parsed is None:
-        _log_failure(urlparse(attempt.base).netloc or "unknown", attempt.model, 200, "unparseable_json", 1, 1)
-        raise LLMError("bad_response")
+        _log_failure(provider_label(attempt.base), attempt.model, 200, "unparseable_json", 1, 1,
+                     reply.timing["total_ms"])
+        raise LLMError("bad_response", 200, reply.timing["total_ms"])
     parsed["provider"] = provider_label(attempt.base)
+    parsed["timing"] = {"provider": parsed["provider"], "model": attempt.model, **reply.timing}
     return parsed
+
+
+async def _resolve(host: str) -> list:
+    """Look the host up, the way the connection will (a separate function so tests don't touch real DNS)."""
+    return await asyncio.get_running_loop().getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+
+
+async def _warm_up(client: httpx.AsyncClient) -> None:
+    """One cheap request to each provider so the first real check doesn't pay for DNS, TCP and TLS, and so the
+    log shows how long each of those takes from this machine. GET /models costs no tokens. Never raises."""
+    targets: dict[str, str] = {}
+    for attempt in _plan(False):
+        targets.setdefault(attempt.base, attempt.api_key)
+    for base, key in targets.items():
+        label = provider_label(base)
+        try:
+            started = time.perf_counter()
+            addresses = await _resolve(urlparse(base).hostname or "")
+            dns_ms = _since(started)
+            v6 = sum(1 for a in addresses if a[0] == socket.AF_INET6)
+            trace, started = _Trace(), time.perf_counter()
+            r = await asyncio.wait_for(client.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"},
+                                                  extensions={"trace": trace}), timeout=15)
+            t = trace.summary()
+            log.info("LLM warm-up: provider=%s status=%s dns=%sms ipv4=%d ipv6=%d connect=%sms tls=%sms ttfb=%sms "
+                     "total=%sms", label, r.status_code, dns_ms, len(addresses) - v6, v6, t["connect_ms"],
+                     t["tls_ms"], t["ttfb_ms"], _since(started))
+        except Exception as e:  # noqa: BLE001  (a warm-up problem must never stop the app from starting)
+            log.warning("LLM warm-up failed: provider=%s error=%s", label, type(e).__name__)
+
+
+async def startup() -> None:
+    """Create the shared client and start warming it up in the background (startup doesn't wait for it)."""
+    global _shared, _warm_task
+    configure_logging()
+    if _shared is None and is_configured():
+        _shared = _client()
+        _warm_task = asyncio.create_task(_warm_up(_shared))
+
+
+async def shutdown() -> None:
+    global _shared, _warm_task
+    if _warm_task is not None:
+        _warm_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _warm_task
+        _warm_task = None
+    if _shared is not None:
+        await _shared.aclose()
+        _shared = None
 
 
 async def analyse(text: str, lang: str, rule_hints: list[dict],
@@ -278,7 +436,9 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
     key = _cache_key(text, lang, os.environ["LLM_MODEL"], image if sees_image else None)
     if key in _cache:
         _cache.move_to_end(key)
-        return copy.deepcopy(_cache[key])
+        hit = copy.deepcopy(_cache[key])
+        hit["timing"] = {"cached": True}   # the stored timing described the original call, not this one
+        return hit
 
     hints = ", ".join(h["label"] for h in rule_hints) or "none"
     user_text = (
@@ -310,7 +470,8 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
     deadline = loop.time() + limit
     result: dict | None = None
     first_error: LLMError | None = None
-    async with _client() as client:
+    failures: list[dict] = []   # what went wrong with each attempt: reported so an outage can be diagnosed from outside
+    async with _use_client() as client:
         for i, attempt in enumerate(plan):
             remaining = deadline - loop.time()
             if i > 0 and remaining < MIN_FALLBACK_SECONDS:
@@ -320,20 +481,25 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
             messages = vision_messages if attempt.vision else text_messages
             try:
                 result = await asyncio.wait_for(_ask(client, attempt, messages), timeout=budget)
+                result["timing"].update(attempt=i + 1, request_ms=round((limit - (deadline - loop.time())) * 1000),
+                                        failed_attempts=failures)
                 break
             except asyncio.TimeoutError:
-                err = LLMError("unavailable")
+                err = LLMError("unavailable", "timeout", round(budget * 1000))
                 log.warning("LLM call failed: provider=%s model=%s status=- error=timeout budget=%.1fs",
                             provider_label(attempt.base), attempt.model, budget)
             except LLMError as e:
                 err = e
+            failures.append({"provider": provider_label(attempt.base), "model": attempt.model, "reason": err.reason,
+                             "status": err.status, "took_ms": err.took_ms})
             first_error = first_error or err  # the primary model's failure is the one worth reporting
             if i + 1 < len(plan):
                 log.warning("LLM falling back: from=%s/%s to=%s/%s reason=%s",
                             provider_label(attempt.base), attempt.model,
                             provider_label(plan[i + 1].base), plan[i + 1].model, err.reason)
     if result is None:
-        raise first_error  # type: ignore[misc]  (set by the failed primary, which always runs first)
+        first_error.attempts = failures  # type: ignore[union-attr]  (the failed primary always runs first)
+        raise first_error  # type: ignore[misc]
 
     _cache[key] = copy.deepcopy(result)  # failures are never cached
     while len(_cache) > CACHE_SIZE:
