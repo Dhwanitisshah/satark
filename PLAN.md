@@ -9,7 +9,9 @@ Each day below has a goal and a "done when" line. Commit between phases.
 ---
 
 ## Tue Oct 6 (tonight, ~2 h): Get it running and claim resources
-- [ ] Ask in the ForgeHacks Discord: deadline timezone, and whether pre-written code/scaffolds are allowed. Screenshot the answers.
+- [ ] Ask in the ForgeHacks Discord what timezone the deadline is in. Screenshot the answer.
+- [ ] **No reuse rule:** don't copy anything from FAKE-NEWS-DETECTOR or any other earlier repo. Open-source libraries (FastAPI, httpx and so on) are fine.
+- [ ] Push this repo **as-is** so its first commit is dated Oct 6. Then commit small and often through Oct 10. The commit history is your proof that everything was built during the event.
 - [ ] Redeem the **Featherless $25 credits** (Discord perks channel). Optionally get a free Gemini key for screenshot reading.
 - [ ] Create the GitHub repo `satark`, push this scaffold as the first commit.
 - [ ] Run locally: `pip install -r requirements.txt`, then `uvicorn app.main:app --reload` from `backend/`. Run `pytest` and `scripts/eval.py`.
