@@ -45,12 +45,19 @@ Done: rules pipeline, FastAPI API, two-stage UI (rules first, AI updates in plac
 accessibility, Gemini LLM layer (retry, cross-provider fallback to Groq, 12s cap, LRU cache), screenshot input via
 the vision model (tested with real Gemini), 63-sample set, grouped eval, `render.yaml`, 177 passing tests (no
 network, plus a Node check of the page script), README Results filled in.
-Latest eval (`gemini-3.1-flash-lite`): known scripts 35/35, rules-blind 0/8 rules-only -> 8/8 with the LLM,
+Eval with Gemini as primary (`gemini-3.1-flash-lite`, an earlier setup): known scripts 35/35, rules-blind 0/8 rules-only -> 8/8 with the LLM,
 false alarms 0/20 rules-only, 1/20 with the LLM (friend asking for Rs 500 on UPI, left alone on purpose).
 
 Latest `--llm` eval with production caps (2026-10-06): 63/63 AI-scored (Gemini 26, Groq 37 after Gemini hit its 7s
 budget), 43/43 scams, 8/8 rules-blind, 0/20 false alarms. Gemini flash-lite is often slower than 7s; Groq is
 faster but limited to ~8k tokens/min, so consider which should be primary if traffic grows.
+
+Live latency (2026-10-07, `scripts/measure_live.py`, Groq primary + Gemini 3.5 fallback, stopgap timeouts removed):
+text median 1.05s / worst 2.0s (Groq 10/10); screenshots median 7.6s / worst 10.0s (Gemini 3/3); 0 of 13 without AI.
+Before the shared client and Gemini 3.5: screenshots 16.0s median / 18.6s worst, one failed. The public API hides
+`ai_timing`/`ai_attempts` unless `SATARK_DEBUG=true`, so the model that answered is not visible from outside; judge the
+model from screenshot timing or the Render logs. Render env that matters: `LLM_FALLBACK_MODEL=gemini-3.5-flash-lite`;
+`LLM_TOTAL_TIMEOUT` / `LLM_PRIMARY_TIMEOUT` back at their defaults (12 / 7).
 
 Deployed: https://satark-1tnt.onrender.com (Render free web service `satark`, id `srv-db2j76qj9qps73ehj1l0`; smoke
 test 4/4 and a live Hindi screenshot check passed on 2026-10-06). The service was created by hand, not via the
@@ -86,7 +93,7 @@ Request flow for `POST /api/check` (multipart: `text`, `image`, `lang` = `en`|`h
    `rules/domains.py` (official domains, brand tokens, TLDs, UPI handles).
 3. `backend/app/llm.py`: optional OpenAI-compatible chat calls on two models (keep the code provider-agnostic),
    configured by `LLM_*` env vars. Roles as of 2026-10-07: the PRIMARY (`LLM_*`) is Groq `qwen/qwen3.8-27b`, a fast
-   text-only model (`LLM_VISION=false`); the FALLBACK (`LLM_FALLBACK_*`) is Gemini `gemini-3.1-flash-lite` with
+   text-only model (`LLM_VISION=false`); the FALLBACK (`LLM_FALLBACK_*`) is Gemini `gemini-3.5-flash-lite` (it reads a screenshot in ~2.5s; 3.1 took 15-18s) with
    `LLM_FALLBACK_VISION=true`. Text checks try primary then fallback; a screenshot-only request goes only to
    vision-capable models (so only Gemini), and the first model tried gets the 500/503 retry. A 429 from either goes
    straight to the other. Rule signals are passed as hints. It returns JSON

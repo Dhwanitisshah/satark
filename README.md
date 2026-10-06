@@ -67,7 +67,7 @@ flowchart LR
 
 - **Backend:** Python, FastAPI, httpx
 - **AI:** two models on two providers, both through OpenAI-compatible endpoints (any provider works). **Groq**
-  (`qwen/qwen3.8-27b`, fast, text only) answers text checks first; **Gemini** (`gemini-3.1-flash-lite`) is the
+  (`qwen/qwen3.8-27b`, fast, text only) answers text checks first; **Gemini** (`gemini-3.5-flash-lite`) is the
   fallback and the only model that reads screenshots. A 429 from either goes straight to the other. One retry on
   500/503, a 12-second cap per request split into stages (the primary gets at most 7s, the fallback gets the rest),
   and an in-memory cache. Optional Tesseract OCR for screenshots.
@@ -105,7 +105,7 @@ How to read this honestly:
   `.gov.in` links.
 - The one remaining false alarm is a friend asking for ₹500 on UPI, which the LLM rates "suspicious". It reads
   like a family-emergency scam without the pressure, so I left it rather than tune the prompt to one sample.
-- LLM column: `gemini-3.1-flash-lite`, 62 of 63 samples got an AI score (61 from Gemini, 1 from the Groq fallback
+- LLM column (an earlier run, when Gemini `gemini-3.1-flash-lite` was the primary): 62 of 63 samples got an AI score (61 from Gemini, 1 from the Groq fallback
   after two Gemini 503s, 1 timed out and fell back to rules). LLM output varies from run to run. A small,
   author-written set is a smoke test, not a benchmark.
 - **With the production time caps and staged budgets** (12s per request, primary limited to 7s): 63 of 63 AI-scored,
@@ -116,6 +116,32 @@ How to read this honestly:
   (`qwen/qwen3.8-27b`) had to answer every sample: 63 of 63 AI-scored, **43/43 scams caught, 8/8 rules-blind, 0/20
   false alarms**. The numbers held, so a Gemini outage doesn't cost accuracy. The limit is throughput (about 8,000
   tokens a minute on Groq's free tier), not quality.
+- **And the other way round?** With Groq deliberately broken so that Gemini (`gemini-3.5-flash-lite`) answered every
+  sample: 63 of 63 AI-scored with no failures, **43/43 scams, 8/8 rules-blind, 1/20 false alarms**. The one false alarm
+  is a friend asking for ₹500 on UPI, which Gemini rates as a scam (51) where Groq doesn't. It only matters when
+  Gemini answers a text check, which is when Groq is rate-limited or down.
+
+### Live speed
+
+Measured against the deployed service (Render free tier, Oregon) on 2026-10-07 with
+`python scripts/measure_live.py <url>`: 10 text checks and 3 screenshot checks, each made unique so the cache
+couldn't help, spaced 12 seconds apart to stay under Groq's free-tier limit. Times are what a person waits, in
+seconds, from sending the request to getting the full result (the rules-only result on the page is instant).
+
+| | n | median | worst | answered by |
+|---|---|---|---|---|
+| **Text check** | 10 | **1.05s** | 2.0s | Groq 10 of 10 |
+| **Screenshot check** | 3 | **7.6s** | 10.0s | Gemini 3 of 3 |
+
+All 13 checks got an AI answer. For comparison, the same measurement before the speed work: text 1.0s median but one
+check took 15.4s (a Groq rate limit, then a slow Gemini), and screenshots took 16.0s median, 18.6s worst, with one
+of three failing. The three changes behind the improvement: one shared keep-alive HTTP client (building a client
+per check cost about 0.3–0.5s here and much more on a throttled free-tier CPU), a warm-up request at startup, and
+`gemini-3.5-flash-lite` for screenshots (the earlier `gemini-3.1-flash-lite` took 15–18s for the same image).
+
+Read these numbers with care. They are a small sample on one day, and screenshot time varies a lot: the same model read
+a screenshot in about 2.5s in a test from a laptop and took 4.5–10s from Render. The text checks were spaced out; a
+burst of more than about 6 checks a minute hits Groq's token limit, and those checks go to Gemini, which is slower.
 
 ## Run it locally (Windows / PowerShell)
 
