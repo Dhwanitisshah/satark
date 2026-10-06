@@ -143,7 +143,9 @@ If the AI call fails (after retries and the optional fallback model), the rules 
 
 - A "low risk" result is not a guarantee. The UI says so.
 - Rules are tuned to Indian scam patterns and English, Hindi and Hinglish keywords; other languages lean on the LLM.
-- The text you check is sent to the configured LLM provider. Satark itself stores nothing.
+- **Privacy:** when the AI layer is on, the text (or screenshot) you check is sent to the LLM provider. On Gemini's
+  free tier, Google may use that content to improve its models. Satark itself stores nothing, and the UI asks users
+  not to paste personal details such as account numbers. The rules-only mode (no API key) sends nothing anywhere.
 
 ## Roadmap
 
