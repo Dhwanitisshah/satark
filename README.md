@@ -11,7 +11,9 @@ Paste a suspicious SMS, WhatsApp message or call script (or upload a screenshot)
 
 ![Satark result for a fake SBI KYC SMS](docs/screenshots/desktop-kyc.png)
 
-> **For judges:** the live demo runs on Render's free tier, which goes to sleep when idle. **The first load may take
+> **Live demo: https://satark-1tnt.onrender.com**
+>
+> **For judges:** it runs on Render's free tier, which goes to sleep when idle. **The first load may take
 > about a minute** (the page shows "Waking up the server…"); after that it responds normally. Results appear
 > instantly from the rules, and the AI check updates them a moment later.
 
