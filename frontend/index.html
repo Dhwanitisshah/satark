@@ -92,6 +92,7 @@
   .error { color: var(--scam); margin-top: 12px; }
   footer { margin-top: 40px; font-size: 14px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
   footer b { color: var(--ink); }
+  footer .built { margin-top: 10px; font-size: 13px; }
   @media (max-width: 520px) { header h1 { font-size: 36px; } .verdict h2 { font-size: 23px; } }
 </style>
 </head>
@@ -144,7 +145,10 @@
     </div>
   </section>
 
-  <footer id="footer"></footer>
+  <footer>
+    <div id="footer"></div>
+    <div class="built" id="built"></div>
+  </footer>
 </main>
 
 <script>
@@ -174,6 +178,7 @@ const I18N = {
     noteChecking: "AI is double-checking…", noteUnavailable: "AI unavailable, rules-only result",
     deltaRaised: "AI raised risk: {a} → {b}", deltaAgrees: "AI agrees with the rules",
     wake: "Waking up the server… the first load can take up to a minute.",
+    built: "Built for ForgeHacks 2026 · AI + Cybersecurity",
     footer: "Lost money? Call <b>1930</b> immediately and report at <b>cybercrime.gov.in</b>. Satark doesn't store your messages. It is a second opinion, not a guarantee.",
   },
   hi: {
@@ -190,6 +195,7 @@ const I18N = {
     noteChecking: "AI दोबारा जाँच रहा है…", noteUnavailable: "AI उपलब्ध नहीं, केवल नियमों का परिणाम",
     deltaRaised: "AI ने जोखिम बढ़ाया: {a} → {b}", deltaAgrees: "AI नियमों से सहमत है",
     wake: "सर्वर चालू हो रहा है… पहली बार में एक मिनट तक लग सकता है।",
+    built: "ForgeHacks 2026 के लिए बनाया गया · AI + साइबर सुरक्षा",
     footer: "पैसे चले गए? तुरंत <b>1930</b> पर कॉल करें और <b>cybercrime.gov.in</b> पर शिकायत करें। Satark आपके संदेश सहेजता नहीं है। यह दूसरी राय है, गारंटी नहीं।",
   },
   mr: {
@@ -206,6 +212,7 @@ const I18N = {
     noteChecking: "AI पुन्हा तपासत आहे…", noteUnavailable: "AI उपलब्ध नाही, फक्त नियमांवर आधारित निकाल",
     deltaRaised: "AI ने धोका वाढवला: {a} → {b}", deltaAgrees: "AI नियमांशी सहमत आहे",
     wake: "सर्व्हर सुरू होत आहे… पहिल्यांदा एक मिनिटापर्यंत वेळ लागू शकतो.",
+    built: "ForgeHacks 2026 साठी बनवले · AI + सायबर सुरक्षा",
     footer: "पैसे गेले? ताबडतोब <b>1930</b> वर कॉल करा आणि <b>cybercrime.gov.in</b> वर तक्रार करा. Satark तुमचे संदेश साठवत नाही. हे दुसरे मत आहे, हमी नाही.",
   },
 };
@@ -233,6 +240,7 @@ function applyLang() {
   $("hMsg").textContent = t("hMsg");
   $("hSteps").textContent = t("hSteps");
   $("footer").innerHTML = t("footer");
+  $("built").textContent = t("built");
   if (!$("go").disabled) $("go").textContent = t("check");
   if (!$("wake").hidden) $("wake").textContent = t("wake");
   if (lastResult) { render(lastResult); setNote(noteState.key, noteState.kind); }   // re-title an on-screen result

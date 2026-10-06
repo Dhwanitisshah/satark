@@ -90,6 +90,10 @@ const tick = () => new Promise(r => setTimeout(r, 5));
     e.els["lang"].value = "hi"; e.els["lang"].onchange();
     check("hindi: html lang, titles and button", e.document.documentElement.lang === "hi" && e.els["hWhy"].textContent === "कारण"
       && e.els["hSteps"].textContent === "अब क्या करें" && e.els["go"].textContent === "संदेश जाँचें");
+    check("hindi: 'built for' line follows the language", e.els["built"].textContent === "ForgeHacks 2026 के लिए बनाया गया · AI + साइबर सुरक्षा");
+    e.els["lang"].value = "mr"; e.els["lang"].onchange();
+    check("marathi: 'built for' line", e.els["built"].textContent === "ForgeHacks 2026 साठी बनवले · AI + सायबर सुरक्षा");
+    e.els["lang"].value = "hi"; e.els["lang"].onchange();
     check("hindi: placeholder, aria-label and footer", e.els["text"].placeholder.startsWith("मिला हुआ") && e.els["lang"].attrs["aria-label"] === "स्पष्टीकरण की भाषा"
       && e.els["footer"].innerHTML.includes("1930"));
     e.els["text"].value = "m"; await e.submit();
