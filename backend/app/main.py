@@ -96,7 +96,7 @@ async def check(
     if not text:  # screenshot we couldn't read: "no scam signs" would be a false all-clear
         raise HTTPException(503, "Couldn't read that screenshot right now. Try again, or paste the message text.")
 
-    return fuse(text, rules, judgement, ai_error)
+    return fuse(text, rules, judgement, ai_error, lang)
 
 
 if FRONTEND.exists():

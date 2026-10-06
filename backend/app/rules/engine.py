@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from .domains import (
     APK_RE,
@@ -30,6 +30,8 @@ class Signal:
     why: str
     weight: int
     evidence: str = ""
+    # Values that were spliced into the English label/why (domain, brand, ...), so a translation can reuse them.
+    params: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -295,7 +297,8 @@ def analyse_url(url: str) -> list[Signal]:
                            15, url))
     if tld in SUSPICIOUS_TLDS:
         sigs.append(Signal("url_tld", "link", f"Cheap throwaway domain ending (.{tld})",
-                           f".{tld} domains are cheap and widely used for phishing pages.", 20, url))
+                           f".{tld} domains are cheap and widely used for phishing pages.", 20, url,
+                           params={"tld": tld}))
     trusted = reg in OFFICIAL_DOMAINS or any(reg.endswith("." + s) or reg == s for s in TRUSTED_SUFFIXES)
     if not trusted:
         label = host.replace(reg, "") + reg.split(".")[0]
@@ -303,7 +306,8 @@ def analyse_url(url: str) -> list[Signal]:
             if re.search(rf"(?:^|[.\-_0-9]){brand}(?:[.\-_0-9]|$)|{brand}{_SCAM_SUFFIX}", label):
                 sigs.append(Signal("url_lookalike", "link", f"Fake '{brand.upper()}' look-alike website",
                                    f"The link uses the name '{brand}' but is not that organisation's official domain "
-                                   f"(it's really {reg}).", 35, url))
+                                   f"(it's really {reg}).", 35, url,
+                                   params={"brand": brand.upper(), "brand_l": brand, "reg": reg}))
                 break
     if url.lower().split("?")[0].endswith(".apk"):
         sigs.append(Signal("url_apk", "malware", "Link downloads an .apk app",
@@ -337,7 +341,7 @@ def analyse_phones(text: str) -> list[Signal]:
             if k in SCAM_COUNTRY_CODES:
                 return [Signal("foreign_number", "impersonation", f"Foreign number (+{k}) claiming to be local",
                                "Indian police, banks and companies don't contact you from foreign WhatsApp numbers.",
-                               25, m.group(0))]
+                               25, m.group(0), params={"k": k})]
     return []
 
 
