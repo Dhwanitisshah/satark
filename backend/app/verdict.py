@@ -66,5 +66,6 @@ def fuse(text: str, rules: dict, llm: dict | None, ai_error: str | None = None) 
         "scores": {"rules": rule_score, "llm": (llm or {}).get("risk")},
         "ai_used": llm is not None,
         "ai_error": None if llm is not None else ai_error,
+        "ai_provider": (llm or {}).get("provider"),
         "analysed_text": text,
     }

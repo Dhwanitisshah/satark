@@ -81,9 +81,10 @@ async def main(use_llm: bool, delay: float) -> None:
         out = fuse(s["text"], rules, judgement, ai_error)
         if ai_error:
             errors[ai_error] = errors.get(ai_error, 0) + 1
-        rows.append({"group": group_of(s), "rules": base["verdict"], "final": out["verdict"], "ai": out["ai_used"]})
+        rows.append({"group": group_of(s), "rules": base["verdict"], "final": out["verdict"], "ai": out["ai_used"],
+                     "provider": out["ai_provider"]})
         llm_score = out["scores"]["llm"]
-        ai_col = "yes" if out["ai_used"] else (ai_error or "-")
+        ai_col = out["ai_provider"] if out["ai_used"] else (ai_error or "-")
         cells = f"{base['verdict']:>10} {base['risk']:>3}"
         if use_llm:
             cells += f" {str(llm_score) if llm_score is not None else '-':>4} {out['verdict']:>10} {out['risk']:>3}  {ai_col:12}"
@@ -110,8 +111,14 @@ async def main(use_llm: bool, delay: float) -> None:
         detail = ", ".join(f"{n} {r}" for r, n in errors.items())
         print(f"\nAI-scored: {ai_scored}/{len(rows)}"
               + (f"   (fell back to rules: {len(rows) - ai_scored}: {detail})" if ai_scored < len(rows) else ""))
-        print(f"Model: {os.getenv('LLM_MODEL')}" + (f"  fallback: {os.getenv('LLM_FALLBACK_MODEL')}"
-                                                     if os.getenv("LLM_FALLBACK_MODEL") else ""))
+        answered: dict[str, int] = {}
+        for r in rows:
+            if r["ai"]:
+                answered[r["provider"]] = answered.get(r["provider"], 0) + 1
+        print("Answered by: " + (", ".join(f"{p} {n}" for p, n in answered.items()) or "-"))
+        print(f"Primary: {llm.provider_label(os.getenv('LLM_BASE_URL', llm.DEFAULT_BASE_URL))}/{os.getenv('LLM_MODEL')}"
+              + (f"   fallback: {llm.provider_label(os.getenv('LLM_FALLBACK_BASE_URL') or os.getenv('LLM_BASE_URL', llm.DEFAULT_BASE_URL))}"
+                 f"/{os.getenv('LLM_FALLBACK_MODEL')}" if os.getenv("LLM_FALLBACK_MODEL") else ""))
 
 
 if __name__ == "__main__":

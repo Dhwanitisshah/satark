@@ -14,6 +14,7 @@ import logging
 import os
 import re
 from collections import OrderedDict
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 import httpx
@@ -170,27 +171,82 @@ async def _complete(client: httpx.AsyncClient, base: str, headers: dict, payload
             raise LLMError("bad_response") from e
     raise LLMError("unavailable")  # pragma: no cover (loop always returns or raises)
 
+PROVIDER_LABELS = {
+    "generativelanguage.googleapis.com": "gemini",
+    "api.groq.com": "groq",
+    "api.openai.com": "openai",
+    "openrouter.ai": "openrouter",
+}
 
-async def _ask(client: httpx.AsyncClient, base: str, headers: dict, payload: dict,
-               delays: tuple[float, ...]) -> dict:
-    """One model: call it (with retries), parse the JSON. Raises LLMError."""
-    parsed = _parse_json(await _complete(client, base, headers, payload, delays))
+
+def provider_label(base: str) -> str:
+    """Short name for the provider behind a base URL, safe to show the client (never the key or path)."""
+    host = urlparse(base).netloc or "unknown"
+    return PROVIDER_LABELS.get(host, host)
+
+
+@dataclass(frozen=True)
+class Attempt:
+    """One model on one provider. The fallback may be a different provider with its own key."""
+    base: str
+    api_key: str
+    model: str
+    delays: tuple[float, ...]
+    vision: bool  # may receive the screenshot; the fallback is always text-only
+
+
+def _plan(no_text: bool) -> list[Attempt]:
+    """Primary first, then the fallback if one is configured. `no_text` means there is no message text
+    for the text-only fallback to read (a screenshot-only request), so the fallback is left out."""
+    base = os.getenv("LLM_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+    key, model = os.environ["LLM_API_KEY"], os.environ["LLM_MODEL"]
+    plan = [Attempt(base, key, model, RETRY_DELAYS, vision=True)]
+
+    fb_model = os.getenv("LLM_FALLBACK_MODEL", "").strip()
+    if not fb_model or no_text:
+        return plan
+    fb_base = (os.getenv("LLM_FALLBACK_BASE_URL", "").strip() or base).rstrip("/")
+    fb_key = os.getenv("LLM_FALLBACK_API_KEY", "").strip()
+    if not fb_key:
+        if fb_base != base:  # never hand the primary provider's key to a different host
+            log.warning("LLM fallback skipped: LLM_FALLBACK_BASE_URL is a different provider but "
+                        "LLM_FALLBACK_API_KEY is not set")
+            return plan
+        fb_key = key
+    if (fb_base, fb_model) != (base, model):
+        plan.append(Attempt(fb_base, fb_key, fb_model, (), vision=False))
+    return plan
+
+
+async def _ask(client: httpx.AsyncClient, attempt: Attempt, messages: list[dict]) -> dict:
+    """One model on one provider: call it (with its retries), parse the JSON. Raises LLMError."""
+    payload = {
+        "model": attempt.model,
+        "temperature": 0.1,
+        # Thinking models spend part of this budget on hidden reasoning; too small and the JSON gets cut off.
+        "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "2048")),
+        "messages": messages,
+    }
+    headers = {"Authorization": f"Bearer {attempt.api_key}"}
+    parsed = _parse_json(await _complete(client, attempt.base, headers, payload, attempt.delays))
     if parsed is None:
-        _log_failure(urlparse(base).netloc or "unknown", payload["model"], 200, "unparseable_json", 1, 1)
+        _log_failure(urlparse(attempt.base).netloc or "unknown", attempt.model, 200, "unparseable_json", 1, 1)
         raise LLMError("bad_response")
+    parsed["provider"] = provider_label(attempt.base)
     return parsed
 
 
 async def analyse(text: str, lang: str, rule_hints: list[dict],
                   image: bytes | None = None, image_mime: str = "image/png") -> dict | None:
-    """Returns the parsed LLM judgement, or None if no LLM is configured.
+    """Returns the parsed LLM judgement (with "provider" naming who answered), or None if no LLM is configured.
 
     Raises LLMError if it is configured but failed, so the caller can fall back to rules and say why.
     """
     if not is_configured():
         return None
 
-    key = _cache_key(text, lang, os.environ["LLM_MODEL"], image if vision_enabled() else None)
+    sees_image = image is not None and vision_enabled()
+    key = _cache_key(text, lang, os.environ["LLM_MODEL"], image if sees_image else None)
     if key in _cache:
         _cache.move_to_end(key)
         return copy.deepcopy(_cache[key])
@@ -201,52 +257,38 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
         f"Signals our rule engine already found: {hints}.\n\n"
         f"Message received:\n\"\"\"\n{text or '(see image)'}\n\"\"\""
     )
-    content: list | str = user_text
-    if image is not None and vision_enabled():
+    system = {"role": "system", "content": SYSTEM_PROMPT}
+    text_messages = [system, {"role": "user", "content": user_text}]
+    vision_messages = text_messages
+    if sees_image:
         b64 = base64.b64encode(image).decode()
-        content = [
+        vision_messages = [system, {"role": "user", "content": [
             {"type": "text", "text": user_text},
             {"type": "image_url", "image_url": {"url": f"data:{image_mime};base64,{b64}"}},
-        ]
+        ]}]
 
-    payload = {
-        "model": os.environ["LLM_MODEL"],
-        "temperature": 0.1,
-        # Thinking models spend part of this budget on hidden reasoning; too small and the JSON gets cut off.
-        "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "2048")),
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": content},
-        ],
-    }
-    base = os.getenv("LLM_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
-    headers = {"Authorization": f"Bearer {os.environ['LLM_API_KEY']}"}
-
-    # Primary model (one retry on 500/503); then, if set, the fallback model (same endpoint and key) once.
-    models = [payload["model"]]
-    fallback = os.getenv("LLM_FALLBACK_MODEL", "").strip()
-    if fallback and fallback != models[0]:
-        models.append(fallback)
+    # The fallback can't see images, so a screenshot-only request (no text to read) skips it.
+    plan = _plan(no_text=not text.strip())
 
     async def run() -> dict:
         first_error: LLMError | None = None
         async with _client() as client:
-            for i, model in enumerate(models):
-                payload["model"] = model
+            for i, attempt in enumerate(plan):
                 try:
-                    return await _ask(client, base, headers, payload, RETRY_DELAYS if i == 0 else ())
+                    return await _ask(client, attempt, vision_messages if attempt.vision else text_messages)
                 except LLMError as e:
                     first_error = first_error or e
-                    if i + 1 < len(models):
-                        log.warning("LLM falling back: provider=%s from=%s to=%s reason=%s",
-                                    urlparse(base).netloc or "unknown", model, models[i + 1], e.reason)
+                    if i + 1 < len(plan):
+                        log.warning("LLM falling back: from=%s/%s to=%s/%s reason=%s",
+                                    provider_label(attempt.base), attempt.model,
+                                    provider_label(plan[i + 1].base), plan[i + 1].model, e.reason)
         raise first_error  # the primary model's failure is the one worth reporting
 
     try:
         result = await asyncio.wait_for(run(), timeout=_total_timeout())
     except asyncio.TimeoutError:
         log.warning("LLM call failed: provider=%s model=%s status=- error=total_timeout limit=%ss",
-                    urlparse(base).netloc or "unknown", models[0], _total_timeout())
+                    provider_label(plan[0].base), plan[0].model, _total_timeout())
         raise LLMError("unavailable") from None
 
     _cache[key] = copy.deepcopy(result)  # failures are never cached

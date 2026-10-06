@@ -39,6 +39,7 @@ def health() -> dict:
         "ok": True,
         "llm": llm.is_configured(),
         "vision": llm.is_configured() and llm.vision_enabled(),
+        "fallback": llm.is_configured() and bool(os.getenv("LLM_FALLBACK_MODEL", "").strip()),
         "ocr": ocr.available(),
     }
 

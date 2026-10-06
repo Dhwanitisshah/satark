@@ -281,7 +281,110 @@ def test_fallback_same_as_primary_is_ignored(wire, monkeypatch):
     assert len(calls) == 2
 
 
+# --- cross-provider fallback -----------------------------------------------------------------
+
+BACKUP_KEY = "gsk-backup-secret"
+
+
+@pytest.fixture
+def cross(monkeypatch):
+    monkeypatch.setenv("LLM_FALLBACK_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.setenv("LLM_FALLBACK_API_KEY", BACKUP_KEY)
+    monkeypatch.setenv("LLM_FALLBACK_MODEL", "backup-model")
+
+
+def by_host(request: httpx.Request) -> str:
+    return request.url.host
+
+
+def primary_down_backup_up(request):
+    return httpx.Response(503) if by_host(request) == "llm.example.test" else chat(json.dumps(GOOD))
+
+
+def test_fallback_on_another_provider_uses_its_own_url_key_and_model(wire, cross):
+    calls, sleeps = wire(primary_down_backup_up)
+    result = run_analyse()
+    assert result["risk"] == 80 and result["provider"] == "groq"
+    assert [by_host(c) for c in calls] == ["llm.example.test"] * 2 + ["api.groq.com"]
+    last = calls[-1]
+    assert model_of(last) == "backup-model"
+    assert last.headers["authorization"] == f"Bearer {BACKUP_KEY}"
+    assert all(KEY not in c.headers["authorization"] for c in calls if by_host(c) == "api.groq.com")
+
+
+def test_primary_answer_is_labelled_with_its_provider(wire, cross, monkeypatch):
+    monkeypatch.setenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
+    wire(lambda r: chat(json.dumps(GOOD)))
+    assert run_analyse()["provider"] == "gemini"
+
+
+def test_unknown_provider_is_labelled_by_hostname(wire):
+    wire(lambda r: chat(json.dumps(GOOD)))
+    assert run_analyse()["provider"] == "llm.example.test"
+
+
+def test_rate_limit_goes_to_the_other_provider(wire, cross):
+    calls, sleeps = wire(lambda r: httpx.Response(429) if by_host(r) == "llm.example.test" else chat(json.dumps(GOOD)))
+    assert run_analyse()["provider"] == "groq"
+    assert [by_host(c) for c in calls] == ["llm.example.test", "api.groq.com"] and sleeps == []
+
+
+def test_both_providers_down_reports_the_primarys_reason(wire, cross):
+    wire(lambda r: httpx.Response(429) if by_host(r) == "llm.example.test" else httpx.Response(503))
+    assert failure_reason() == "rate_limited"
+
+
+def test_fallback_is_skipped_for_a_screenshot_only_request(wire, cross, monkeypatch):
+    monkeypatch.setenv("LLM_VISION", "true")
+    calls, _ = wire(lambda r: httpx.Response(429))
+    with pytest.raises(llm.LLMError):
+        asyncio.run(llm.analyse("", "en", [], b"fake-png"))
+    assert [by_host(c) for c in calls] == ["llm.example.test"]  # text-only fallback has nothing to read
+
+
+def test_fallback_gets_text_only_even_when_a_screenshot_came_with_the_text(wire, cross, monkeypatch):
+    monkeypatch.setenv("LLM_VISION", "true")
+    seen = {}
+
+    def handler(request):
+        seen[by_host(request)] = json.loads(request.content)["messages"][1]["content"]
+        return httpx.Response(503) if by_host(request) == "llm.example.test" else chat(json.dumps(GOOD))
+
+    wire(handler)
+    asyncio.run(llm.analyse(MESSAGE, "en", [], b"fake-png"))
+    assert isinstance(seen["llm.example.test"], list)   # primary got text + image
+    assert isinstance(seen["api.groq.com"], str)        # fallback got plain text
+
+
+def test_primary_key_is_never_sent_to_a_different_provider_without_its_own_key(wire, monkeypatch):
+    monkeypatch.setenv("LLM_FALLBACK_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.setenv("LLM_FALLBACK_MODEL", "backup-model")   # note: no LLM_FALLBACK_API_KEY
+    calls, _ = wire(lambda r: httpx.Response(503))
+    assert failure_reason() == "unavailable"
+    assert {by_host(c) for c in calls} == {"llm.example.test"}
+
+
+def test_same_provider_fallback_reuses_the_primary_key(wire, monkeypatch):
+    monkeypatch.setenv("LLM_FALLBACK_MODEL", "backup-model")
+    calls, _ = wire(lambda r: httpx.Response(503) if model_of(r) == "test-model" else chat(json.dumps(GOOD)))
+    run_analyse()
+    assert calls[-1].headers["authorization"] == f"Bearer {KEY}"
+
+
 # --- through the API -------------------------------------------------------------------------
+
+def test_api_reports_which_provider_answered(monkeypatch):
+    async def ok(*args, **kwargs):
+        return {**GOOD, "provider": "groq"}
+
+    monkeypatch.setattr(llm, "analyse", ok)
+    body = TestClient(app).post("/api/check", data={"text": MESSAGE}).json()
+    assert body["ai_provider"] == "groq"
+
+
+def test_api_ai_provider_is_null_without_ai():
+    body = TestClient(app).post("/api/check", data={"text": "Are we meeting at 8?"}).json()
+    assert body["ai_provider"] is None
 
 client = TestClient(app)
 
