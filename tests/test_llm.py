@@ -489,6 +489,128 @@ def test_a_timed_out_primary_is_logged_without_secrets(monkeypatch, budgets, cap
     assert KEY not in caplog.text and BACKUP_KEY not in caplog.text and "KYC" not in caplog.text
 
 
+# --- swapped roles: a fast text-only primary (Groq) with a vision fallback (Gemini) ----------------
+
+GROQ, GEMINI = "api.groq.com", "generativelanguage.googleapis.com"
+
+
+@pytest.fixture
+def swapped(monkeypatch, wire):
+    """Primary = Groq (text only). Fallback = Gemini (reads screenshots). Both have their own key."""
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.setenv("LLM_MODEL", "groq-text-model")
+    monkeypatch.setenv("LLM_VISION", "false")
+    monkeypatch.setenv("LLM_FALLBACK_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
+    monkeypatch.setenv("LLM_FALLBACK_API_KEY", BACKUP_KEY)
+    monkeypatch.setenv("LLM_FALLBACK_MODEL", "gemini-vision-model")
+    monkeypatch.setenv("LLM_FALLBACK_VISION", "true")
+    return wire
+
+
+def ok_everywhere(request):
+    return chat(json.dumps(GOOD))
+
+
+def test_text_checks_go_to_the_text_primary_first(swapped):
+    calls, _ = swapped(ok_everywhere)
+    result = run_analyse()
+    assert result["provider"] == "groq" and [by_host(c) for c in calls] == [GROQ]
+    assert calls[0].headers["authorization"] == f"Bearer {KEY}"
+
+
+def test_a_429_from_the_text_primary_goes_straight_to_gemini(swapped):
+    calls, sleeps = swapped(lambda r: httpx.Response(429) if by_host(r) == GROQ else chat(json.dumps(GOOD)))
+    assert run_analyse()["provider"] == "gemini"
+    assert [by_host(c) for c in calls] == [GROQ, GEMINI] and sleeps == []   # no retry, no waiting
+    assert calls[1].headers["authorization"] == f"Bearer {BACKUP_KEY}"
+
+
+def test_a_429_from_gemini_as_the_fallback_ends_in_rules_only(swapped):
+    calls, _ = swapped(lambda r: httpx.Response(503) if by_host(r) == GROQ else httpx.Response(429))
+    assert failure_reason() == "unavailable"        # the primary's reason is the one reported
+    assert [by_host(c) for c in calls] == [GROQ, GROQ, GEMINI]   # Groq: one retry on 503; Gemini: one attempt
+
+
+def test_screenshot_only_always_goes_to_gemini_and_never_to_the_text_model(swapped, monkeypatch):
+    seen = {}
+
+    def handler(request):
+        seen[by_host(request)] = json.loads(request.content)["messages"][1]["content"]
+        return chat(json.dumps(GOOD))
+
+    calls, _ = swapped(handler)
+    result = asyncio.run(llm.analyse("", "en", [], b"fake-png"))
+    assert result["provider"] == "gemini"
+    assert [by_host(c) for c in calls] == [GEMINI]
+    assert any(part.get("type") == "image_url" for part in seen[GEMINI])   # the image really went along
+
+
+def test_screenshot_only_gemini_gets_the_retry_and_a_429_ends_it_without_touching_groq(swapped):
+    replies = iter([httpx.Response(503), chat(json.dumps(GOOD))])
+    calls, sleeps = swapped(lambda r: next(replies))
+    assert asyncio.run(llm.analyse("", "en", [], b"fake-png"))["provider"] == "gemini"
+    assert sleeps == [2.0] and {by_host(c) for c in calls} == {GEMINI}
+
+
+def test_screenshot_only_rate_limited_gemini_is_a_clean_failure(swapped):
+    calls, _ = swapped(lambda r: httpx.Response(429))
+    with pytest.raises(llm.LLMError) as exc:
+        asyncio.run(llm.analyse("", "en", [], b"fake-png"))
+    assert exc.value.reason == "rate_limited" and [by_host(c) for c in calls] == [GEMINI]
+
+
+def test_text_plus_screenshot_text_primary_gets_text_and_the_fallback_gets_the_image(swapped):
+    seen = {}
+
+    def handler(request):
+        seen[by_host(request)] = json.loads(request.content)["messages"][1]["content"]
+        return httpx.Response(503) if by_host(request) == GROQ else chat(json.dumps(GOOD))
+
+    swapped(handler)
+    asyncio.run(llm.analyse(MESSAGE, "en", [], b"fake-png"))
+    assert isinstance(seen[GROQ], str)      # the text model never receives image data
+    assert isinstance(seen[GEMINI], list)   # Gemini does, because it can read it
+
+
+def test_no_vision_capable_model_means_a_clean_failure_and_no_calls(swapped, monkeypatch):
+    monkeypatch.setenv("LLM_FALLBACK_VISION", "false")
+    calls, _ = swapped(ok_everywhere)
+    with pytest.raises(llm.LLMError):
+        asyncio.run(llm.analyse("", "en", [], b"fake-png"))
+    assert calls == []
+
+
+def test_vision_enabled_follows_whichever_model_can_see(monkeypatch):
+    monkeypatch.setenv("LLM_FALLBACK_MODEL", "m")
+    assert llm.vision_enabled() is False
+    monkeypatch.setenv("LLM_FALLBACK_VISION", "true")
+    assert llm.vision_enabled() is True                        # only the fallback can see
+    monkeypatch.delenv("LLM_FALLBACK_MODEL")
+    assert llm.vision_enabled() is False                       # the flag means nothing without a fallback model
+    monkeypatch.setenv("LLM_VISION", "true")
+    assert llm.vision_enabled() is True                        # the primary can see
+
+
+def test_a_screenshot_only_read_uses_the_whole_vision_cap_not_the_primary_budget(swapped, monkeypatch):
+    monkeypatch.setenv("LLM_PRIMARY_TIMEOUT", "0.1")           # would cut a normal primary short...
+    monkeypatch.setenv("LLM_TOTAL_TIMEOUT_VISION", "5")
+
+    async def slow(request):
+        await asyncio.sleep(0.4)
+        return chat(json.dumps(GOOD))
+
+    monkeypatch.setattr(llm, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(slow)))
+    assert asyncio.run(llm.analyse("", "en", [], b"fake-png"))["provider"] == "gemini"   # ...but Gemini is alone here
+
+
+def test_api_accepts_a_screenshot_when_only_the_fallback_can_read_it(swapped, monkeypatch):
+    monkeypatch.setattr("app.main.ocr.available", lambda: False)
+    swapped(ok_everywhere)
+    assert TestClient(app).get("/api/health").json()["vision"] is True
+    r = TestClient(app).post("/api/check", data={"ai": "true"}, files={"image": ("s.png", b"x", "image/png")})
+    assert r.status_code in (200, 503)      # accepted (not the 422 "isn't set up"); this fake image has no text
+
+
 # --- through the API -------------------------------------------------------------------------
 
 def test_api_reports_which_provider_answered(monkeypatch):

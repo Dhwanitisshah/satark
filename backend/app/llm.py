@@ -14,7 +14,7 @@ import logging
 import os
 import re
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.parse import urlparse
 
 import httpx
@@ -88,8 +88,15 @@ def is_configured() -> bool:
     return bool(os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL"))
 
 
+def _flag(name: str) -> bool:
+    return os.getenv(name, "false").lower() in {"1", "true", "yes"}
+
+
 def vision_enabled() -> bool:
-    return os.getenv("LLM_VISION", "false").lower() in {"1", "true", "yes"}
+    """True if some configured model can read screenshots: the primary (LLM_VISION), or the fallback when
+    it is marked LLM_FALLBACK_VISION. A text-only primary with a vision fallback still reads screenshots."""
+    fallback = bool(os.getenv("LLM_FALLBACK_MODEL", "").strip()) and _flag("LLM_FALLBACK_VISION")
+    return _flag("LLM_VISION") or fallback
 
 
 # In-memory LRU of successful judgements, so re-checking the same message (demo re-runs, a family
@@ -206,29 +213,32 @@ class Attempt:
     api_key: str
     model: str
     delays: tuple[float, ...]
-    vision: bool  # may receive the screenshot; the fallback is always text-only
+    vision: bool  # can read a screenshot (LLM_VISION / LLM_FALLBACK_VISION); text-only models never get the image
 
 
-def _plan(no_text: bool) -> list[Attempt]:
-    """Primary first, then the fallback if one is configured. `no_text` means there is no message text
-    for the text-only fallback to read (a screenshot-only request), so the fallback is left out."""
+def _plan(reading_image: bool) -> list[Attempt]:
+    """Models to try, in order: the primary, then the fallback if one is configured.
+
+    `reading_image` means a screenshot-only request: there is no text for a text-only model to work from, so
+    only vision-capable models are kept. Whichever model ends up first gets the one retry on 500/503."""
     base = os.getenv("LLM_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
     key, model = os.environ["LLM_API_KEY"], os.environ["LLM_MODEL"]
-    plan = [Attempt(base, key, model, RETRY_DELAYS, vision=True)]
+    plan = [Attempt(base, key, model, (), vision=_flag("LLM_VISION"))]
 
     fb_model = os.getenv("LLM_FALLBACK_MODEL", "").strip()
-    if not fb_model or no_text:
-        return plan
-    fb_base = (os.getenv("LLM_FALLBACK_BASE_URL", "").strip() or base).rstrip("/")
-    fb_key = os.getenv("LLM_FALLBACK_API_KEY", "").strip()
-    if not fb_key:
-        if fb_base != base:  # never hand the primary provider's key to a different host
+    if fb_model:
+        fb_base = (os.getenv("LLM_FALLBACK_BASE_URL", "").strip() or base).rstrip("/")
+        fb_key = os.getenv("LLM_FALLBACK_API_KEY", "").strip()
+        if not fb_key and fb_base != base:  # never hand the primary provider's key to a different host
             log.warning("LLM fallback skipped: LLM_FALLBACK_BASE_URL is a different provider but "
                         "LLM_FALLBACK_API_KEY is not set")
-            return plan
-        fb_key = key
-    if (fb_base, fb_model) != (base, model):
-        plan.append(Attempt(fb_base, fb_key, fb_model, (), vision=False))
+        elif (fb_base, fb_model) != (base, model):
+            plan.append(Attempt(fb_base, fb_key or key, fb_model, (), vision=_flag("LLM_FALLBACK_VISION")))
+
+    if reading_image:
+        plan = [a for a in plan if a.vision]
+    if plan:
+        plan[0] = replace(plan[0], delays=RETRY_DELAYS)
     return plan
 
 
@@ -259,6 +269,11 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
     if not is_configured():
         return None
 
+    if image is not None and not text.strip() and not vision_enabled():
+        # Nothing to read and nothing that can read it: don't ask a text model about "(see image)".
+        log.warning("LLM call failed: screenshot-only request but no configured model can read images")
+        raise LLMError("unavailable")
+
     sees_image = image is not None and vision_enabled()
     key = _cache_key(text, lang, os.environ["LLM_MODEL"], image if sees_image else None)
     if key in _cache:
@@ -281,12 +296,16 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
             {"type": "image_url", "image_url": {"url": f"data:{image_mime};base64,{b64}"}},
         ]}]
 
-    # The fallback can't see images, so a screenshot-only request (no text to read) skips it.
-    plan = _plan(no_text=not text.strip())
+    # A screenshot-only request (no text to read) can only go to models that can see images.
+    reading_image = sees_image and not text.strip()
+    plan = _plan(reading_image)
+    if not plan:
+        log.warning("LLM call failed: no configured model can read a screenshot")
+        raise LLMError("unavailable")
 
     # One deadline for the whole request. A slow primary may only spend its own budget (when there is a
     # fallback to leave time for), so the fallback always gets the remainder instead of a dead clock.
-    limit = _total_timeout(reading_image=sees_image and not text.strip())
+    limit = _total_timeout(reading_image=reading_image)
     loop = asyncio.get_running_loop()
     deadline = loop.time() + limit
     result: dict | None = None
