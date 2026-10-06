@@ -66,9 +66,11 @@ flowchart LR
 ## Tech stack
 
 - **Backend:** Python, FastAPI, httpx
-- **AI:** Gemini through its OpenAI-compatible endpoint (any OpenAI-compatible provider works). One retry on 500/503,
-  a 12-second cap per request split into stages (the primary gets at most 7s, the fallback gets the rest), an
-  in-memory cache, and an optional **fallback on a different provider** (Groq in our setup). Gemini also reads screenshots. Optional Tesseract OCR for screenshots.
+- **AI:** two models on two providers, both through OpenAI-compatible endpoints (any provider works). **Groq**
+  (`qwen/qwen3.8-27b`, fast, text only) answers text checks first; **Gemini** (`gemini-3.1-flash-lite`) is the
+  fallback and the only model that reads screenshots. A 429 from either goes straight to the other. One retry on
+  500/503, a 12-second cap per request split into stages (the primary gets at most 7s, the fallback gets the rest),
+  and an in-memory cache. Optional Tesseract OCR for screenshots.
 - **Frontend:** a single static page (vanilla HTML/CSS/JS, no build step), mobile-first, served by FastAPI. It shows
   the rules result instantly, then updates it in place when the AI answers. Hindi, Marathi, screen-reader and
   keyboard support.
@@ -168,7 +170,7 @@ Response (trimmed):
 }
 ```
 
-`ai_provider` says which provider answered (`"gemini"`, `"groq"`, …), so a fallback is visible. If the AI call fails
+`ai_provider` says which provider answered (`"groq"`, `"gemini"`, …), so a fallback is visible. If the AI call fails
 (after the retry and the optional fallback), the rules still answer and `ai_error` is `"rate_limited"`,
 `"unavailable"` or `"bad_response"`; the UI then shows "AI unavailable, rules-only result". A screenshot that can't
 be read returns a friendly 503 rather than a false "no scam signs".
@@ -185,11 +187,12 @@ Environment variables (values are in `.env.example`; **never commit real keys**)
 
 | Variable | Purpose |
 |---|---|
-| `LLM_API_KEY` | **secret.** Gemini API key (primary provider) |
-| `LLM_BASE_URL`, `LLM_MODEL` | primary provider endpoint and model |
-| `LLM_VISION` | `true` so the model can read screenshots (there is no Tesseract on Render) |
-| `LLM_FALLBACK_API_KEY` | **secret.** key for the fallback provider |
-| `LLM_FALLBACK_BASE_URL`, `LLM_FALLBACK_MODEL` | fallback provider endpoint and model (text-only) |
+| `LLM_API_KEY` | **secret.** the **primary** model's key (Groq) |
+| `LLM_BASE_URL`, `LLM_MODEL` | primary provider endpoint and model (Groq, a text model) |
+| `LLM_VISION` | can the primary read screenshots? `false` for Groq's text models |
+| `LLM_FALLBACK_API_KEY` | **secret.** the **fallback** model's key (Gemini) |
+| `LLM_FALLBACK_BASE_URL`, `LLM_FALLBACK_MODEL` | fallback provider endpoint and model (Gemini) |
+| `LLM_FALLBACK_VISION` | `true`: the fallback reads screenshots (there is no Tesseract on Render) |
 | `LLM_TOTAL_TIMEOUT`, `LLM_TOTAL_TIMEOUT_VISION` | cap on all AI work per request, in seconds (text check / screenshot-only) |
 | `LLM_PRIMARY_TIMEOUT` | most the primary may use while a fallback is waiting (default 7s); the fallback gets the rest of the cap |
 | `LLM_TIMEOUT`, `LLM_MAX_TOKENS` | optional: per-call timeout and reply budget |
@@ -212,18 +215,18 @@ Check a deployment with `pwsh scripts\smoke_test.ps1 -Base https://<your-service
 
 - A "low risk" result is not a guarantee. The UI says so.
 - Rules are tuned to Indian scam patterns and English, Hindi and Hinglish keywords; other languages lean on the LLM.
-- **Privacy:** when the AI layer is on, the text (or screenshot) you check is sent to the LLM provider. On Gemini's
-  free tier, Google may use that content to improve its models. Satark itself stores nothing, and the UI asks users
-  not to paste personal details such as account numbers. If the fallback provider is configured, a message the
-  primary couldn't answer is sent to that provider instead (text only, never the screenshot). The rules-only mode
-  (no API key) sends nothing anywhere.
-- **Free-tier limits:** the AI layer depends on free quotas. Gemini returns the occasional 503 or 429, and the
-  Groq fallback allows about 8,000 tokens a minute, roughly six checks a minute. When both are unavailable the
-  rules answer alone, and repeated checks of the same message are served from an in-memory cache.
+- **Privacy:** when the AI layer is on, the text you check is sent to Groq, and to Google (Gemini) if Groq can't
+  answer. A screenshot goes only to Google, because only Gemini can read images. On Gemini's free tier, Google may
+  use that content to improve its models. Satark itself stores nothing, and the UI asks users not to paste personal
+  details such as account numbers. The rules-only mode (no API key) sends nothing anywhere.
+- **Free-tier limits:** the AI layer depends on free quotas. Groq (the primary) allows about 8,000 tokens a minute,
+  roughly six checks a minute; beyond that a 429 sends the check to Gemini, which is slower (often 5–10s) and
+  returns the occasional 503 or 429. When both are unavailable the rules answer alone, and repeated checks of the
+  same message are served from an in-memory cache.
 - **Hindi and Marathi:** the headline, section titles and page text are translated, and the AI writes its
   explanation in the chosen language. The "what to do now" steps are a fixed English playbook for now. Translations
   have not been reviewed by a native speaker.
-- **Screenshots** are read by the vision model, so they need the AI to be available.
+- **Screenshots** are read by Gemini (the only vision model configured), so they need Gemini to be available.
 
 ## Roadmap
 

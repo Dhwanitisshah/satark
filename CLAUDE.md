@@ -84,18 +84,23 @@ Request flow for `POST /api/check` (multipart: `text`, `image`, `lang` = `en`|`h
    shorteners, punycode, raw IP, `.apk`), UPI ID checks, and foreign phone numbers. Each `Signal` has an
    `evidence` string; the score is the sum of weights, capped at 100. Reference lists live in
    `rules/domains.py` (official domains, brand tokens, TLDs, UPI handles).
-3. `backend/app/llm.py`: optional OpenAI-compatible chat call (Gemini by default, also used for vision; keep the
-   code provider-agnostic), configured by `LLM_*` env vars. Rule signals are passed as hints. It returns JSON
+3. `backend/app/llm.py`: optional OpenAI-compatible chat calls on two models (keep the code provider-agnostic),
+   configured by `LLM_*` env vars. Roles as of 2026-10-07: the PRIMARY (`LLM_*`) is Groq `qwen/qwen3.8-27b`, a fast
+   text-only model (`LLM_VISION=false`); the FALLBACK (`LLM_FALLBACK_*`) is Gemini `gemini-3.1-flash-lite` with
+   `LLM_FALLBACK_VISION=true`. Text checks try primary then fallback; a screenshot-only request goes only to
+   vision-capable models (so only Gemini), and the first model tried gets the 500/503 retry. A 429 from either goes
+   straight to the other. Rule signals are passed as hints. It returns JSON
    (`risk`, `scam_type`, `red_flags`, `explanation`, `extracted_text`), or `None` if unconfigured. On failure it
    retries 500/503 once after 2s (never 429), then tries the fallback once, all under one 12s deadline
    (`LLM_TOTAL_TIMEOUT`; 18s for screenshot-only, `LLM_TOTAL_TIMEOUT_VISION`). Per-stage budgets: while a fallback
    is waiting the primary gets at most `LLM_PRIMARY_TIMEOUT` (7s) and the fallback gets whatever remains (skipped if
    under 0.5s is left); with no fallback the primary gets the whole deadline. Then raises `LLMError(reason)` with
    `rate_limited` | `unavailable` | `bad_response`. `main.py` catches it, the rules still answer, and the API returns
-   `ai_error`. The fallback (`LLM_FALLBACK_BASE_URL` / `_API_KEY` / `_MODEL`) can be another provider (Groq,
-   `qwen/qwen3.8-27b`; note `llama-3.3-70b-versatile` is NOT on this key). It is text-only, so it is skipped for
-   screenshot-only requests, and the primary's key is never sent to a different host. The answer carries
-   `provider`, surfaced as `ai_provider`. Groq's free tier is ~8k tokens/min, so pace evals at >=12s per call.
+   `ai_error`. The fallback (`LLM_FALLBACK_BASE_URL` / `_API_KEY` / `_MODEL` / `_VISION`) is usually another
+   provider, and the primary's key is never sent to a different host. Note `llama-3.3-70b-versatile` is NOT on this
+   Groq key (404); `qwen/qwen3.8-27b` is what works. The answer carries `provider`, surfaced as `ai_provider`.
+   Groq's free tier is ~8k tokens/min (about 6 checks a minute), so pace evals at >=12s per call; past that a 429
+   sends the check to Gemini, which is slower.
    Failures are logged with provider, model and status only, never the key or message text. Successful judgements
    are cached in memory (LRU, 256 entries, keyed on text hash + image hash + lang + model; failures never cached).
    Tests clear every `LLM_*` var and the cache (`tests/conftest.py`), so `.env` can't leak in and pytest never

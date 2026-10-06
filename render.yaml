@@ -19,21 +19,26 @@ services:
         - requirements.txt
     envVars:
       # --- secrets: enter these in the Render dashboard ---
+      # LLM_API_KEY is the PRIMARY model's key (Groq); LLM_FALLBACK_API_KEY is the fallback's (Gemini).
       - key: LLM_API_KEY
         sync: false
       - key: LLM_FALLBACK_API_KEY
         sync: false
       # --- settings (same defaults as .env.example) ---
+      # Primary: Groq, a fast text model that can't read screenshots.
       - key: LLM_BASE_URL
-        value: https://generativelanguage.googleapis.com/v1beta/openai
-      - key: LLM_MODEL
-        value: gemini-3.1-flash-lite
-      - key: LLM_VISION
-        value: "true"
-      - key: LLM_FALLBACK_BASE_URL
         value: https://api.groq.com/openai/v1
-      - key: LLM_FALLBACK_MODEL
+      - key: LLM_MODEL
         value: qwen/qwen3.8-27b
+      - key: LLM_VISION
+        value: "false"
+      # Fallback: Gemini, which also reads every screenshot.
+      - key: LLM_FALLBACK_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta/openai
+      - key: LLM_FALLBACK_MODEL
+        value: gemini-3.1-flash-lite
+      - key: LLM_FALLBACK_VISION
+        value: "true"
       - key: LLM_TOTAL_TIMEOUT
         value: "12"
       - key: CORS_ORIGINS
