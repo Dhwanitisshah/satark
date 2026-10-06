@@ -1,0 +1,3 @@
+-r requirements.txt
+pytest>=8.0
+pillow>=10.0   # scripts/make_screenshots.py renders the test screenshots

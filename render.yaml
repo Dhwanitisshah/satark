@@ -1,0 +1,33 @@
+# Render Blueprint: a free web service for the whole app (the API serves the static UI at /).
+# Secrets are declared with `sync: false`, so Render asks for them in the dashboard and they are never in git.
+services:
+  - type: web
+    name: satark
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r ../requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # --- secrets: enter these in the Render dashboard ---
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_FALLBACK_API_KEY
+        sync: false
+      # --- settings (same defaults as .env.example) ---
+      - key: LLM_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta/openai
+      - key: LLM_MODEL
+        value: gemini-3.1-flash-lite
+      - key: LLM_VISION
+        value: "true"
+      - key: LLM_FALLBACK_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: LLM_FALLBACK_MODEL
+        value: qwen/qwen3.8-27b
+      - key: LLM_TOTAL_TIMEOUT
+        value: "12"
+      - key: CORS_ORIGINS
+        value: "*"

@@ -11,6 +11,10 @@ Paste a suspicious SMS, WhatsApp message or call script (or upload a screenshot)
 
 ![Satark result for a fake SBI KYC SMS](docs/screenshots/desktop-kyc.png)
 
+> **For judges:** the live demo runs on Render's free tier, which goes to sleep when idle. **The first load may take
+> about a minute** (the page shows "Waking up the server…"); after that it responds normally. Results appear
+> instantly from the rules, and the AI check updates them a moment later.
+
 ---
 
 ## The problem
@@ -60,9 +64,15 @@ flowchart LR
 ## Tech stack
 
 - **Backend:** Python, FastAPI, httpx
-- **AI:** Gemini through its OpenAI-compatible endpoint (any OpenAI-compatible provider works), with retries and an optional fallback model. The same model reads screenshots. Optional Tesseract OCR for screenshots.
-- **Frontend:** a single static page (vanilla HTML/CSS/JS), mobile-first, served by FastAPI
-- **Tests:** pytest (rule engine + API), a labelled sample set, an eval script
+- **AI:** Gemini through its OpenAI-compatible endpoint (any OpenAI-compatible provider works). One retry on 500/503,
+  a 12-second cap per request, an in-memory cache, and an optional **fallback on a different provider** (Groq in our
+  setup). Gemini also reads screenshots. Optional Tesseract OCR for screenshots.
+- **Frontend:** a single static page (vanilla HTML/CSS/JS, no build step), mobile-first, served by FastAPI. It shows
+  the rules result instantly, then updates it in place when the AI answers. Hindi, Marathi, screen-reader and
+  keyboard support.
+- **Hosting:** Render (free web service) via `render.yaml`
+- **Tests:** pytest (rules, API, LLM failure paths, vision, cache, fallback), a Node check of the page script, a
+  labelled sample set, an eval script
 
 ## Results
 
@@ -101,7 +111,7 @@ git clone https://github.com/Dhwanitisshah/satark.git
 cd satark
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # runtime + pytest + Pillow (the server alone needs only requirements.txt)
 copy .env.example .env          # add LLM_API_KEY (optional, rules-only works without it)
 
 cd backend
@@ -125,6 +135,7 @@ pwsh scripts\smoke_test.ps1     # with the server running
 | `text` | string | the message (optional if `image` is sent) |
 | `image` | file | PNG/JPG screenshot, max 5 MB |
 | `lang` | `en` \| `hi` \| `mr` | language of the explanation |
+| `ai` | bool, default `true` | `false` returns the rules-only verdict immediately (the UI calls this first, then again with `true`) |
 
 Response (trimmed):
 
@@ -141,14 +152,42 @@ Response (trimmed):
   "actions": ["Don't click links, pay, or reply to this message.", "…"],
   "scores": {"rules": 90, "llm": 95},
   "ai_used": true,
-  "ai_error": null
+  "ai_error": null,
+  "ai_provider": "gemini"
 }
 ```
 
-If the AI call fails (after retries and the optional fallback model), the rules still answer and `ai_error` is
-`"rate_limited"`, `"unavailable"` or `"bad_response"`; the UI then shows "AI busy, showing rules-only result".
+`ai_provider` says which provider answered (`"gemini"`, `"groq"`, …), so a fallback is visible. If the AI call fails
+(after the retry and the optional fallback), the rules still answer and `ai_error` is `"rate_limited"`,
+`"unavailable"` or `"bad_response"`; the UI then shows "AI unavailable, rules-only result". A screenshot that can't
+be read returns a friendly 503 rather than a false "no scam signs".
 
-`GET /api/health` reports whether the LLM, vision and OCR are available.
+`GET /api/health` reports whether the LLM, vision, fallback and OCR are available.
+
+## Deploy on Render (free)
+
+`render.yaml` describes the service: root `backend/`, build `pip install -r ../requirements.txt`, start
+`uvicorn app.main:app --host 0.0.0.0 --port $PORT`, health check `/api/health`. Use **New → Blueprint** in the
+Render dashboard and point it at this repo; Render asks for the two secrets.
+
+Environment variables (values are in `.env.example`; **never commit real keys**):
+
+| Variable | Purpose |
+|---|---|
+| `LLM_API_KEY` | **secret.** Gemini API key (primary provider) |
+| `LLM_BASE_URL`, `LLM_MODEL` | primary provider endpoint and model |
+| `LLM_VISION` | `true` so the model can read screenshots (there is no Tesseract on Render) |
+| `LLM_FALLBACK_API_KEY` | **secret.** key for the fallback provider |
+| `LLM_FALLBACK_BASE_URL`, `LLM_FALLBACK_MODEL` | fallback provider endpoint and model (text-only) |
+| `LLM_TOTAL_TIMEOUT` | cap on all AI work per request, in seconds |
+| `LLM_TIMEOUT`, `LLM_MAX_TOKENS` | optional: per-call timeout and reply budget |
+| `CORS_ORIGINS` | allowed origins (`*` by default) |
+
+The free tier sleeps after about 15 minutes without traffic and takes up to a minute to wake. The page pings
+`/api/health` on load, so it is usually awake by the time someone has pasted a message, and it says
+"Waking up the server…" while it waits.
+
+Check a deployment with `pwsh scripts\smoke_test.ps1 -Base https://<your-service>.onrender.com`.
 
 ## Real-world impact
 
@@ -163,7 +202,16 @@ If the AI call fails (after retries and the optional fallback model), the rules 
 - Rules are tuned to Indian scam patterns and English, Hindi and Hinglish keywords; other languages lean on the LLM.
 - **Privacy:** when the AI layer is on, the text (or screenshot) you check is sent to the LLM provider. On Gemini's
   free tier, Google may use that content to improve its models. Satark itself stores nothing, and the UI asks users
-  not to paste personal details such as account numbers. The rules-only mode (no API key) sends nothing anywhere.
+  not to paste personal details such as account numbers. If the fallback provider is configured, a message the
+  primary couldn't answer is sent to that provider instead (text only, never the screenshot). The rules-only mode
+  (no API key) sends nothing anywhere.
+- **Free-tier limits:** the AI layer depends on free quotas. Gemini returns the occasional 503 or 429, and the
+  Groq fallback allows about 8,000 tokens a minute, roughly six checks a minute. When both are unavailable the
+  rules answer alone, and repeated checks of the same message are served from an in-memory cache.
+- **Hindi and Marathi:** the headline, section titles and page text are translated, and the AI writes its
+  explanation in the chosen language. The "what to do now" steps are a fixed English playbook for now. Translations
+  have not been reviewed by a native speaker.
+- **Screenshots** are read by the vision model, so they need the AI to be available.
 
 ## Roadmap
 
@@ -179,13 +227,17 @@ backend/app/
   main.py          FastAPI app + static frontend
   rules/engine.py  scam patterns, link / UPI / phone checks, scoring
   rules/domains.py brand tokens, official domains, TLD + UPI handle lists
-  llm.py           OpenAI-compatible LLM call + JSON parsing
+  llm.py           OpenAI-compatible LLM call: retry, cross-provider fallback, 12s cap, cache, JSON parsing
   verdict.py       fusion of rules + LLM, hallucination guard
   actions.py       deterministic next-step playbook
   ocr.py           optional Tesseract OCR
-frontend/index.html
-samples/messages.json   labelled test messages
-scripts/eval.py         catch-rate / false-alarm report
+frontend/index.html     the whole UI (two-stage result, hi/mr, accessibility)
+samples/messages.json   63 labelled test messages (35 scams, 8 rules-blind, 20 genuine)
+samples/screenshots/    generated test screenshots
+scripts/eval.py         grouped catch-rate / false-alarm report, rules-only vs rules + LLM
+scripts/make_screenshots.py  renders the test screenshots
 scripts/smoke_test.ps1  end-to-end check against a running server
-tests/                  pytest suite
+tests/                  pytest suite + ui_flow.js (Node check of the page script)
+render.yaml             Render Blueprint
+requirements.txt        what the server needs; requirements-dev.txt adds pytest and Pillow
 ```
