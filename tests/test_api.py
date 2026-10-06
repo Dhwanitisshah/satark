@@ -11,6 +11,10 @@ def test_health():
     assert r.status_code == 200 and r.json()["ok"] is True
 
 
+def test_tests_never_use_a_real_llm():
+    assert llm.is_configured() is False
+
+
 def test_check_scam_without_llm(monkeypatch):
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     r = client.post("/api/check", data={"text": "Your SBI account will be blocked. Update KYC: http://sbi-kyc.xyz"})
