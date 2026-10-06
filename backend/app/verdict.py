@@ -67,5 +67,6 @@ def fuse(text: str, rules: dict, llm: dict | None, ai_error: str | None = None) 
         "ai_used": llm is not None,
         "ai_error": None if llm is not None else ai_error,
         "ai_provider": (llm or {}).get("provider"),
+        "ai_timing": (llm or {}).get("timing"),
         "analysed_text": text,
     }

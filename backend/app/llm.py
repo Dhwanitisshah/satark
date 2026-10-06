@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import time
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 from urllib.parse import urlparse
@@ -123,6 +124,42 @@ def _client() -> httpx.AsyncClient:
 _sleep = asyncio.sleep  # indirection so tests can skip the backoff
 
 
+class _Trace:
+    """Collects httpcore's connection events for one request, so a slow call can be split into DNS+connect,
+    TLS and time-to-first-byte. Holds only timestamps: never a URL, header, key or message text."""
+
+    def __init__(self) -> None:
+        self.at: dict[str, float] = {}
+
+    async def __call__(self, event: str, info: dict) -> None:
+        self.at.setdefault(event, time.perf_counter())
+
+    def _ms(self, start: str, end: str) -> int | None:
+        if start in self.at and end in self.at:
+            return round((self.at[end] - self.at[start]) * 1000)
+        return None
+
+    def summary(self) -> dict:
+        return {
+            # connect_tcp covers resolving the name AND opening the socket (anyio does both); None = pooled connection reused
+            "connect_ms": self._ms("connection.connect_tcp.started", "connection.connect_tcp.complete"),
+            "tls_ms": self._ms("connection.start_tls.started", "connection.start_tls.complete"),
+            # request fully sent -> response headers back: the provider's think time plus network round trip
+            "ttfb_ms": self._ms("http11.send_request_body.complete", "http11.receive_response_headers.complete"),
+            "reused": "connection.connect_tcp.started" not in self.at,
+        }
+
+
+def configure_logging() -> None:
+    """Make INFO lines from this module visible (Python only shows WARNING+ for a logger nobody configured)."""
+    logger = logging.getLogger("satark")
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+        logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+
 def _strip_fences(raw: str) -> str:
     return re.sub(r"```(?:json)?", "", raw, flags=re.IGNORECASE).strip()
 
@@ -153,44 +190,75 @@ def _parse_json(raw: str) -> dict | None:
     return data
 
 
-def _log_failure(provider: str, model: str, status: int | str, error: str, attempt: int, attempts: int) -> None:
+def _log_failure(provider: str, model: str, status: int | str, error: str, attempt: int, attempts: int,
+                 took_ms: int | None = None) -> None:
     # Deliberately no key, URL, request body or message text here.
-    log.warning("LLM call failed: provider=%s model=%s status=%s error=%s attempt=%d/%d",
-                provider, model, status, error, attempt, attempts)
+    log.warning("LLM call failed: provider=%s model=%s status=%s error=%s attempt=%d/%d took=%sms",
+                provider, model, status, error, attempt, attempts, "-" if took_ms is None else took_ms)
+
+
+@dataclass
+class Reply:
+    content: str
+    timing: dict  # connect_ms, tls_ms, ttfb_ms, total_ms, reused, prompt_tokens, completion_tokens, reasoning_tokens
+
+
+def _tokens(body: dict) -> dict:
+    """Token counts from an OpenAI-style `usage` block; None where the provider doesn't say."""
+    usage = body.get("usage") if isinstance(body, dict) else None
+    usage = usage if isinstance(usage, dict) else {}
+    details = usage.get("completion_tokens_details")
+    details = details if isinstance(details, dict) else {}
+    return {"prompt_tokens": usage.get("prompt_tokens"), "completion_tokens": usage.get("completion_tokens"),
+            "reasoning_tokens": details.get("reasoning_tokens")}
 
 
 async def _complete(client: httpx.AsyncClient, base: str, headers: dict, payload: dict,
-                    delays: tuple[float, ...] = RETRY_DELAYS) -> str:
+                    delays: tuple[float, ...] = RETRY_DELAYS) -> Reply:
     """POST one chat completion, retrying transient errors after each wait in `delays`.
-    Returns the reply text or raises LLMError."""
-    provider, model = urlparse(base).netloc or "unknown", payload["model"]
+    Returns the reply text with its timing, or raises LLMError."""
+    provider, model = provider_label(base), payload["model"]
     attempts = len(delays) + 1
     for attempt in range(1, attempts + 1):
+        trace, started = _Trace(), time.perf_counter()
         try:
-            r = await client.post(f"{base}/chat/completions", json=payload, headers=headers)
+            r = await client.post(f"{base}/chat/completions", json=payload, headers=headers,
+                                  extensions={"trace": trace})
         except httpx.HTTPError as e:
-            _log_failure(provider, model, "-", type(e).__name__, attempt, attempts)
+            _log_failure(provider, model, "-", type(e).__name__, attempt, attempts, _since(started))
             raise LLMError("unavailable") from e
+        took = _since(started)
 
         if r.status_code == 429:
-            _log_failure(provider, model, 429, "rate_limited", attempt, attempts)
+            _log_failure(provider, model, 429, "rate_limited", attempt, attempts, took)
             raise LLMError("rate_limited")
         if r.status_code in RETRY_STATUSES:
-            _log_failure(provider, model, r.status_code, "unavailable", attempt, attempts)
+            _log_failure(provider, model, r.status_code, "unavailable", attempt, attempts, took)
             if attempt < attempts:
                 await _sleep(delays[attempt - 1])
                 continue
             raise LLMError("unavailable")
         if r.status_code >= 400:  # bad key, bad model name, ...: retrying won't help
-            _log_failure(provider, model, r.status_code, "http_error", attempt, attempts)
+            _log_failure(provider, model, r.status_code, "http_error", attempt, attempts, took)
             raise LLMError("unavailable")
 
         try:
-            return r.json()["choices"][0]["message"]["content"] or ""
+            body = r.json()
+            content = body["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, TypeError, ValueError) as e:
-            _log_failure(provider, model, r.status_code, type(e).__name__, attempt, attempts)
+            _log_failure(provider, model, r.status_code, type(e).__name__, attempt, attempts, took)
             raise LLMError("bad_response") from e
+        timing = {**trace.summary(), "total_ms": took, **_tokens(body)}
+        log.info("LLM call ok: provider=%s model=%s status=%s connect=%sms tls=%sms ttfb=%sms total=%sms reused=%s "
+                 "prompt_tokens=%s completion_tokens=%s reasoning_tokens=%s",
+                 provider, model, r.status_code, timing["connect_ms"], timing["tls_ms"], timing["ttfb_ms"], took,
+                 timing["reused"], timing["prompt_tokens"], timing["completion_tokens"], timing["reasoning_tokens"])
+        return Reply(content, timing)
     raise LLMError("unavailable")  # pragma: no cover (loop always returns or raises)
+
+
+def _since(started: float) -> int:
+    return round((time.perf_counter() - started) * 1000)
 
 PROVIDER_LABELS = {
     "generativelanguage.googleapis.com": "gemini",
@@ -252,11 +320,14 @@ async def _ask(client: httpx.AsyncClient, attempt: Attempt, messages: list[dict]
         "messages": messages,
     }
     headers = {"Authorization": f"Bearer {attempt.api_key}"}
-    parsed = _parse_json(await _complete(client, attempt.base, headers, payload, attempt.delays))
+    reply = await _complete(client, attempt.base, headers, payload, attempt.delays)
+    parsed = _parse_json(reply.content)
     if parsed is None:
-        _log_failure(urlparse(attempt.base).netloc or "unknown", attempt.model, 200, "unparseable_json", 1, 1)
+        _log_failure(provider_label(attempt.base), attempt.model, 200, "unparseable_json", 1, 1,
+                     reply.timing["total_ms"])
         raise LLMError("bad_response")
     parsed["provider"] = provider_label(attempt.base)
+    parsed["timing"] = {"provider": parsed["provider"], "model": attempt.model, **reply.timing}
     return parsed
 
 
@@ -278,7 +349,9 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
     key = _cache_key(text, lang, os.environ["LLM_MODEL"], image if sees_image else None)
     if key in _cache:
         _cache.move_to_end(key)
-        return copy.deepcopy(_cache[key])
+        hit = copy.deepcopy(_cache[key])
+        hit["timing"] = {"cached": True}   # the stored timing described the original call, not this one
+        return hit
 
     hints = ", ".join(h["label"] for h in rule_hints) or "none"
     user_text = (
@@ -320,6 +393,7 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
             messages = vision_messages if attempt.vision else text_messages
             try:
                 result = await asyncio.wait_for(_ask(client, attempt, messages), timeout=budget)
+                result["timing"].update(attempt=i + 1, request_ms=round((limit - (deadline - loop.time())) * 1000))
                 break
             except asyncio.TimeoutError:
                 err = LLMError("unavailable")

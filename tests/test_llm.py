@@ -189,6 +189,90 @@ def test_system_prompt_calibrates_bank_alerts_and_keeps_keywordless_scams_in_vie
     assert "no obvious keywords" in system and "judge the pattern" in system
 
 
+# --- per-call timing and logs ----------------------------------------------------------------
+
+def with_usage(reasoning=None):
+    usage = {"prompt_tokens": 486, "completion_tokens": 219, "total_tokens": 705}
+    if reasoning is not None:
+        usage["completion_tokens_details"] = {"reasoning_tokens": reasoning}
+    return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(GOOD)}}], "usage": usage})
+
+
+def test_the_answer_carries_its_timing_and_token_counts(wire):
+    wire(lambda r: with_usage(reasoning=247))
+    t = run_analyse()["timing"]
+    assert t["provider"] == "llm.example.test" and t["model"] == "test-model" and t["attempt"] == 1
+    assert t["total_ms"] >= 0 and t["request_ms"] >= t["total_ms"] - 5
+    assert (t["prompt_tokens"], t["completion_tokens"], t["reasoning_tokens"]) == (486, 219, 247)
+    assert set(t) >= {"connect_ms", "tls_ms", "ttfb_ms", "reused"}      # None here: a mock has no real socket
+
+
+def test_missing_usage_is_none_not_an_error(wire):
+    wire(lambda r: chat(json.dumps(GOOD)))
+    t = run_analyse()["timing"]
+    assert t["prompt_tokens"] is None and t["completion_tokens"] is None and t["reasoning_tokens"] is None
+
+
+def test_timing_names_the_model_that_actually_answered(wire, cross):
+    wire(primary_down_backup_up)
+    t = run_analyse()["timing"]
+    assert t["provider"] == "groq" and t["model"] == "backup-model" and t["attempt"] == 2
+
+
+def test_each_successful_call_is_logged_with_its_numbers_and_nothing_secret(wire, caplog):
+    wire(lambda r: with_usage(reasoning=0))
+    with caplog.at_level(logging.INFO, logger="satark.llm"):
+        run_analyse()
+    line = next(r.getMessage() for r in caplog.records if "LLM call ok" in r.getMessage())
+    for part in ("provider=llm.example.test", "model=test-model", "status=200", "connect=", "tls=", "ttfb=", "total=",
+                 "prompt_tokens=486", "completion_tokens=219", "reasoning_tokens=0", "reused="):
+        assert part in line
+    assert KEY not in caplog.text and "SBI" not in caplog.text and "KYC" not in caplog.text and "Bearer" not in caplog.text
+
+
+def test_failures_log_how_long_they_took(wire, caplog):
+    wire(lambda r: httpx.Response(401))
+    with caplog.at_level(logging.WARNING, logger="satark.llm"):
+        failure_reason()
+    assert "status=401" in caplog.text and "took=" in caplog.text and "ms" in caplog.text
+
+
+def test_the_trace_hook_turns_httpcore_events_into_phases():
+    trace = llm._Trace()
+    clock = iter([0.0, 0.050, 0.060, 0.200, 0.210, 6.900])      # connect 50ms, TLS 140ms, then a 6.69s wait
+    events = ["connection.connect_tcp.started", "connection.connect_tcp.complete", "connection.start_tls.started",
+              "connection.start_tls.complete", "http11.send_request_body.complete",
+              "http11.receive_response_headers.complete"]
+    import unittest.mock as mock
+    with mock.patch.object(llm.time, "perf_counter", side_effect=lambda: next(clock)):
+        for e in events:
+            asyncio.run(trace(e, {}))
+    s = trace.summary()
+    assert (s["connect_ms"], s["tls_ms"], s["ttfb_ms"], s["reused"]) == (50, 140, 6690, False)
+
+
+def test_a_reused_connection_is_reported_as_reused():
+    trace = llm._Trace()
+    asyncio.run(trace("http11.send_request_body.complete", {}))
+    asyncio.run(trace("http11.receive_response_headers.complete", {}))
+    s = trace.summary()
+    assert s["reused"] is True and s["connect_ms"] is None and s["tls_ms"] is None and s["ttfb_ms"] is not None
+
+
+def test_info_lines_become_visible_once_logging_is_configured():
+    logger = logging.getLogger("satark")
+    before = list(logger.handlers)
+    try:
+        llm.configure_logging()
+        llm.configure_logging()          # idempotent: no duplicate handler
+        assert logger.level == logging.INFO and len(logger.handlers) == len(before) + (0 if before else 1)
+    finally:
+        for h in list(logger.handlers):
+            if h not in before:
+                logger.removeHandler(h)
+        logger.setLevel(logging.NOTSET)
+
+
 # --- cache -----------------------------------------------------------------------------------
 
 def ask(text=MESSAGE, lang="en", image=None):
@@ -198,7 +282,9 @@ def ask(text=MESSAGE, lang="en", image=None):
 def test_repeat_check_is_served_from_cache(wire):
     calls, _ = wire(lambda r: chat(json.dumps(GOOD)))
     first, second = ask(), ask()
-    assert first == second and len(calls) == 1
+    assert len(calls) == 1
+    assert {k: v for k, v in first.items() if k != "timing"} == {k: v for k, v in second.items() if k != "timing"}
+    assert second["timing"] == {"cached": True} and first["timing"]["total_ms"] >= 0   # a hit says it was a hit
 
 
 def test_cache_is_keyed_on_text_lang_and_model(wire, monkeypatch):
@@ -620,6 +706,23 @@ def test_api_reports_which_provider_answered(monkeypatch):
     monkeypatch.setattr(llm, "analyse", ok)
     body = TestClient(app).post("/api/check", data={"text": MESSAGE}).json()
     assert body["ai_provider"] == "groq"
+
+
+def test_api_exposes_the_timing_of_the_call_that_answered(monkeypatch):
+    timing = {"provider": "groq", "model": "m", "connect_ms": 40, "tls_ms": 90, "ttfb_ms": 700, "total_ms": 900,
+              "reused": False, "completion_tokens": 219}
+
+    async def ok(*args, **kwargs):
+        return {**GOOD, "provider": "groq", "timing": timing}
+
+    monkeypatch.setattr(llm, "analyse", ok)
+    body = TestClient(app).post("/api/check", data={"text": MESSAGE}).json()
+    assert body["ai_timing"] == timing
+
+
+def test_api_ai_timing_is_null_without_ai():
+    body = TestClient(app).post("/api/check", data={"text": "Are we meeting at 8?"}).json()
+    assert body["ai_timing"] is None
 
 
 def test_api_ai_provider_is_null_without_ai():
