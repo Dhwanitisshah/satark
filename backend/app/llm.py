@@ -170,7 +170,8 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
     payload = {
         "model": os.environ["LLM_MODEL"],
         "temperature": 0.1,
-        "max_tokens": 700,
+        # Thinking models spend part of this budget on hidden reasoning; too small and the JSON gets cut off.
+        "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "2048")),
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": content},

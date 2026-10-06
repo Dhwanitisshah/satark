@@ -133,6 +133,15 @@ def test_failure_log_has_provider_model_status_but_no_secrets(wire, caplog):
     assert KEY not in logged and "SBI" not in logged and "KYC" not in logged
 
 
+def test_token_budget_leaves_room_for_thinking_models(wire, monkeypatch):
+    calls, _ = wire(lambda r: chat(json.dumps(GOOD)))
+    run_analyse()
+    assert json.loads(calls[0].content)["max_tokens"] >= 2048
+    monkeypatch.setenv("LLM_MAX_TOKENS", "4096")
+    run_analyse()
+    assert json.loads(calls[1].content)["max_tokens"] == 4096
+
+
 # --- fallback model --------------------------------------------------------------------------
 
 def model_of(request: httpx.Request) -> str:
