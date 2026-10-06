@@ -157,6 +157,16 @@ def test_token_budget_leaves_room_for_thinking_models(wire, monkeypatch):
     assert json.loads(calls[1].content)["max_tokens"] == 4096
 
 
+def test_system_prompt_calibrates_bank_alerts_and_keeps_keywordless_scams_in_view(wire):
+    calls, _ = wire(lambda r: chat(json.dumps(GOOD)))
+    run_analyse()
+    system = json.loads(calls[0].content)["messages"][0]["content"].lower()
+    # genuine look-alikes the model over-scored in the first eval: UPI alerts and a friend's small ask
+    assert "debit/credit alerts" in system and "friend or family member asking for a small amount" in system
+    # and scams with no keyword must stay in view, so calibration can't make it lenient
+    assert "no obvious keywords" in system and "judge the pattern" in system
+
+
 # --- cache -----------------------------------------------------------------------------------
 
 def ask(text=MESSAGE, lang="en", image=None):
