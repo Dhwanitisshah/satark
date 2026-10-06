@@ -48,6 +48,10 @@ network, plus a Node check of the page script), README Results filled in.
 Latest eval (`gemini-3.1-flash-lite`): known scripts 35/35, rules-blind 0/8 rules-only -> 8/8 with the LLM,
 false alarms 0/20 rules-only, 1/20 with the LLM (friend asking for Rs 500 on UPI, left alone on purpose).
 
+Latest `--llm` eval with production caps (2026-10-06): 63/63 AI-scored (Gemini 26, Groq 37 after Gemini hit its 7s
+budget), 43/43 scams, 8/8 rules-blind, 0/20 false alarms. Gemini flash-lite is often slower than 7s; Groq is
+faster but limited to ~8k tokens/min, so consider which should be primary if traffic grows.
+
 Deployed: https://satark-1tnt.onrender.com (Render free web service `satark`, id `srv-db2j76qj9qps73ehj1l0`; smoke
 test 4/4 and a live Hindi screenshot check passed on 2026-10-06). The service was created by hand, not via the
 Blueprint, so its dashboard settings must match `render.yaml`: Root Directory `backend`, build

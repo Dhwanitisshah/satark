@@ -106,6 +106,10 @@ How to read this honestly:
 - LLM column: `gemini-3.1-flash-lite`, 62 of 63 samples got an AI score (61 from Gemini, 1 from the Groq fallback
   after two Gemini 503s, 1 timed out and fell back to rules). LLM output varies from run to run. A small,
   author-written set is a smoke test, not a benchmark.
+- **With the production time caps and staged budgets** (12s per request, primary limited to 7s): 63 of 63 AI-scored,
+  **43/43 scams, 8/8 rules-blind, 0/20 false alarms**. Gemini exceeded its 7s budget on 37 of the 63 samples that
+  day, and Groq answered each of them within the same request. Before the staged budgets, a slow Gemini used up the
+  whole cap and those checks fell back to rules-only.
 - **Does the fallback hold up?** Re-running with the Gemini model deliberately broken, so that Groq
   (`qwen/qwen3.8-27b`) had to answer every sample: 63 of 63 AI-scored, **43/43 scams caught, 8/8 rules-blind, 0/20
   false alarms**. The numbers held, so a Gemini outage doesn't cost accuracy. The limit is throughput (about 8,000
