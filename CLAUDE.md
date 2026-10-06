@@ -62,6 +62,14 @@ service's Build Filter lists them (`backend/**`, `frontend/**`, `requirements.tx
 dashboard service must be set by hand). Otherwise trigger a deploy through the Render MCP. `PYTHON_VERSION` was not applied, so it runs on Python 3.14.3 (works). `.mcp.json` holds
 the Render API key and is gitignored; never commit it.
 
+**Diagnosing slow or failed AI calls.** The API returns `ai_timing` (connect/TLS/first-byte ms, reuse, tokens) and,
+when the AI fails, `ai_attempts` (per provider: HTTP status or error name, ms). `python scripts/measure_live.py <url>`
+runs 10 text + 3 screenshot checks and prints median/worst and the provider mix. Render shows the same in its logs
+("LLM call ok" / "LLM warm-up" lines). Status `401` from Groq and `400` from Gemini mean the API keys on Render are
+wrong (swapped between `LLM_API_KEY` and `LLM_FALLBACK_API_KEY`, or corrupted): `LLM_API_KEY` must be the Groq key
+(starts `gsk_`). The app keeps one shared keep-alive HTTP client and warms it up at startup; per-request clients cost
+~225ms of CPU each, which a free-tier instance multiplies. Qwen on Groq does not think by default (~220 tokens).
+
 **Translations are drafted but NOT deployed.** The Hindi/Marathi playbook, headlines and red-flag text are in
 `actions.py`, `verdict.py` and `rules/translations.py`, with the review sheet in `docs/translations_review.md`
 (regenerate with `python scripts/make_translation_review.py`; a test fails if it is stale). They are committed locally
