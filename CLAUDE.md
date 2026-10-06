@@ -59,8 +59,7 @@ dashboard service must be set by hand). Otherwise trigger a deploy through the R
 the Render API key and is gitignored; never commit it.
 
 Not done: translated "what to do now" steps (still a fixed English playbook), native-speaker review of the hi/mr
-strings, demo video, Devpost text, a per-attempt time budget (a slow primary can eat the whole 12s cap so the
-fallback never runs; seen once live).
+strings, demo video, Devpost text.
 
 Samples: `rules_blind: true` marks scams with no keyword the rules know. They exist to show what the LLM adds, so
 **never add regexes to make them pass**; a test keeps their rule score at 0. The known-script results are in-sample
@@ -84,8 +83,10 @@ Request flow for `POST /api/check` (multipart: `text`, `image`, `lang` = `en`|`h
 3. `backend/app/llm.py`: optional OpenAI-compatible chat call (Gemini by default, also used for vision; keep the
    code provider-agnostic), configured by `LLM_*` env vars. Rule signals are passed as hints. It returns JSON
    (`risk`, `scam_type`, `red_flags`, `explanation`, `extracted_text`), or `None` if unconfigured. On failure it
-   retries 500/503 once after 2s (never 429), then tries the fallback once, all under a 12s total cap
-   (`LLM_TOTAL_TIMEOUT`; 18s for screenshot-only, `LLM_TOTAL_TIMEOUT_VISION`), then raises `LLMError(reason)` with
+   retries 500/503 once after 2s (never 429), then tries the fallback once, all under one 12s deadline
+   (`LLM_TOTAL_TIMEOUT`; 18s for screenshot-only, `LLM_TOTAL_TIMEOUT_VISION`). Per-stage budgets: while a fallback
+   is waiting the primary gets at most `LLM_PRIMARY_TIMEOUT` (7s) and the fallback gets whatever remains (skipped if
+   under 0.5s is left); with no fallback the primary gets the whole deadline. Then raises `LLMError(reason)` with
    `rate_limited` | `unavailable` | `bad_response`. `main.py` catches it, the rules still answer, and the API returns
    `ai_error`. The fallback (`LLM_FALLBACK_BASE_URL` / `_API_KEY` / `_MODEL`) can be another provider (Groq,
    `qwen/qwen3.8-27b`; note `llama-3.3-70b-versatile` is NOT on this key). It is text-only, so it is skipped for

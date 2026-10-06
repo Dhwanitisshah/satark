@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import time
 
 import httpx
 import pytest
@@ -390,6 +391,102 @@ def test_same_provider_fallback_reuses_the_primary_key(wire, monkeypatch):
     calls, _ = wire(lambda r: httpx.Response(503) if model_of(r) == "test-model" else chat(json.dumps(GOOD)))
     run_analyse()
     assert calls[-1].headers["authorization"] == f"Bearer {KEY}"
+
+
+# --- per-stage time budgets ------------------------------------------------------------------
+# Real (short) sleeps through an async mock transport, so the deadline arithmetic is what's tested.
+
+def slow_world(monkeypatch, primary_s: float, backup_s: float):
+    """Primary and backup providers that each take a fixed time to answer. Returns the list of hosts called."""
+    called: list[str] = []
+
+    async def handler(request):
+        host = request.url.host
+        called.append(host)
+        await asyncio.sleep(primary_s if host == "llm.example.test" else backup_s)
+        return chat(json.dumps(GOOD))
+
+    monkeypatch.setattr(llm, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    return called
+
+
+def timed(coro_factory):
+    start = time.perf_counter()
+    try:
+        return coro_factory(), time.perf_counter() - start
+    except llm.LLMError as e:
+        return e, time.perf_counter() - start
+
+
+@pytest.fixture
+def budgets(monkeypatch, wire, cross):
+    def setup(total: float, primary: float):
+        monkeypatch.setenv("LLM_TOTAL_TIMEOUT", str(total))
+        monkeypatch.setenv("LLM_PRIMARY_TIMEOUT", str(primary))
+    return setup
+
+
+def test_default_budgets_leave_the_fallback_room():
+    assert llm._primary_timeout() == 7.0
+    assert llm._primary_timeout() < llm._total_timeout()
+
+
+def test_a_slow_primary_still_leaves_the_fallback_time_to_answer(monkeypatch, budgets):
+    budgets(total=3.0, primary=0.2)
+    called = slow_world(monkeypatch, primary_s=5.0, backup_s=0.1)   # the old code would have burned the whole cap
+    result, took = timed(run_analyse)
+    assert result["provider"] == "groq" and result["risk"] == 80
+    assert called == ["llm.example.test", "api.groq.com"]          # primary tried once, then the fallback
+    assert took < 1.0                                                # ~0.3s, nowhere near the 3s cap
+
+
+def test_the_fallback_gets_the_remainder_not_a_budget_of_its_own(monkeypatch, budgets):
+    budgets(total=1.0, primary=0.3)
+    slow_world(monkeypatch, primary_s=5.0, backup_s=0.5)            # 0.7s left after the primary: just enough
+    result, took = timed(run_analyse)
+    assert result["provider"] == "groq"
+    assert took < 1.1
+
+
+def test_a_fallback_slower_than_the_remainder_is_cut_off_at_the_total_cap(monkeypatch, budgets):
+    budgets(total=1.0, primary=0.3)
+    called = slow_world(monkeypatch, primary_s=5.0, backup_s=3.0)
+    err, took = timed(run_analyse)
+    assert isinstance(err, llm.LLMError) and err.reason == "unavailable"
+    assert called == ["llm.example.test", "api.groq.com"]            # the fallback did get its turn...
+    assert 0.8 < took < 1.4                                          # ...and the overall cap is respected, not exceeded
+
+
+def test_without_a_fallback_the_primary_gets_the_whole_cap(monkeypatch, wire):
+    monkeypatch.setenv("LLM_TOTAL_TIMEOUT", "2.0")
+    monkeypatch.setenv("LLM_PRIMARY_TIMEOUT", "0.1")                 # irrelevant: nobody is waiting behind it
+    slow_world(monkeypatch, primary_s=0.4, backup_s=0.0)
+    assert run_analyse()["provider"] == "llm.example.test"
+
+
+def test_fallback_is_not_started_when_the_primary_used_up_the_clock(monkeypatch, budgets):
+    budgets(total=0.6, primary=5.0)                                  # primary budget is capped by what remains
+    called = slow_world(monkeypatch, primary_s=5.0, backup_s=0.1)
+    err, took = timed(run_analyse)
+    assert isinstance(err, llm.LLMError)
+    assert called == ["llm.example.test"]                            # < 0.5s left, so no pointless fallback call
+    assert took < 1.1
+
+
+def test_a_fast_primary_is_untouched_by_the_budgets(monkeypatch, budgets):
+    budgets(total=3.0, primary=0.2)
+    called = slow_world(monkeypatch, primary_s=0.05, backup_s=0.05)
+    assert run_analyse()["provider"] == "llm.example.test"
+    assert called == ["llm.example.test"]
+
+
+def test_a_timed_out_primary_is_logged_without_secrets(monkeypatch, budgets, caplog):
+    budgets(total=3.0, primary=0.1)
+    slow_world(monkeypatch, primary_s=5.0, backup_s=0.05)
+    with caplog.at_level(logging.WARNING, logger="satark.llm"):
+        run_analyse()
+    assert "error=timeout" in caplog.text and "falling back" in caplog.text
+    assert KEY not in caplog.text and BACKUP_KEY not in caplog.text and "KYC" not in caplog.text
 
 
 # --- through the API -------------------------------------------------------------------------

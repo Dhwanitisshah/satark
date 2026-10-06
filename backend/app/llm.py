@@ -40,6 +40,15 @@ def _total_timeout(reading_image: bool = False) -> float:
         return float(os.getenv("LLM_TOTAL_TIMEOUT_VISION", "18"))
     return float(os.getenv("LLM_TOTAL_TIMEOUT", "12"))
 
+
+def _primary_timeout() -> float:
+    """How long the primary model may take when a fallback is waiting. The fallback gets the rest of the
+    total cap, so a slow primary can't use up the whole clock (seen live: Gemini at 12s, Groq never asked)."""
+    return float(os.getenv("LLM_PRIMARY_TIMEOUT", "7"))
+
+
+MIN_FALLBACK_SECONDS = 0.5  # less than this left and the fallback can't answer, so don't start it
+
 SYSTEM_PROMPT = """You are Satark, a fraud analyst protecting ordinary people in India from scams \
 (digital arrest, KYC/account block, courier/customs, task jobs, investment groups, UPI refund/QR tricks, \
 fake electricity bills, APK malware, impersonated relatives, AI voice clones).
@@ -275,27 +284,37 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
     # The fallback can't see images, so a screenshot-only request (no text to read) skips it.
     plan = _plan(no_text=not text.strip())
 
-    async def run() -> dict:
-        first_error: LLMError | None = None
-        async with _client() as client:
-            for i, attempt in enumerate(plan):
-                try:
-                    return await _ask(client, attempt, vision_messages if attempt.vision else text_messages)
-                except LLMError as e:
-                    first_error = first_error or e
-                    if i + 1 < len(plan):
-                        log.warning("LLM falling back: from=%s/%s to=%s/%s reason=%s",
-                                    provider_label(attempt.base), attempt.model,
-                                    provider_label(plan[i + 1].base), plan[i + 1].model, e.reason)
-        raise first_error  # the primary model's failure is the one worth reporting
-
+    # One deadline for the whole request. A slow primary may only spend its own budget (when there is a
+    # fallback to leave time for), so the fallback always gets the remainder instead of a dead clock.
     limit = _total_timeout(reading_image=sees_image and not text.strip())
-    try:
-        result = await asyncio.wait_for(run(), timeout=limit)
-    except asyncio.TimeoutError:
-        log.warning("LLM call failed: provider=%s model=%s status=- error=total_timeout limit=%ss",
-                    provider_label(plan[0].base), plan[0].model, limit)
-        raise LLMError("unavailable") from None
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + limit
+    result: dict | None = None
+    first_error: LLMError | None = None
+    async with _client() as client:
+        for i, attempt in enumerate(plan):
+            remaining = deadline - loop.time()
+            if i > 0 and remaining < MIN_FALLBACK_SECONDS:
+                log.warning("LLM fallback skipped: only %.1fs of the %ss budget left", max(remaining, 0), limit)
+                break
+            budget = min(remaining, _primary_timeout()) if i == 0 and len(plan) > 1 else remaining
+            messages = vision_messages if attempt.vision else text_messages
+            try:
+                result = await asyncio.wait_for(_ask(client, attempt, messages), timeout=budget)
+                break
+            except asyncio.TimeoutError:
+                err = LLMError("unavailable")
+                log.warning("LLM call failed: provider=%s model=%s status=- error=timeout budget=%.1fs",
+                            provider_label(attempt.base), attempt.model, budget)
+            except LLMError as e:
+                err = e
+            first_error = first_error or err  # the primary model's failure is the one worth reporting
+            if i + 1 < len(plan):
+                log.warning("LLM falling back: from=%s/%s to=%s/%s reason=%s",
+                            provider_label(attempt.base), attempt.model,
+                            provider_label(plan[i + 1].base), plan[i + 1].model, err.reason)
+    if result is None:
+        raise first_error  # type: ignore[misc]  (set by the failed primary, which always runs first)
 
     _cache[key] = copy.deepcopy(result)  # failures are never cached
     while len(_cache) > CACHE_SIZE:

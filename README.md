@@ -67,8 +67,8 @@ flowchart LR
 
 - **Backend:** Python, FastAPI, httpx
 - **AI:** Gemini through its OpenAI-compatible endpoint (any OpenAI-compatible provider works). One retry on 500/503,
-  a 12-second cap per request, an in-memory cache, and an optional **fallback on a different provider** (Groq in our
-  setup). Gemini also reads screenshots. Optional Tesseract OCR for screenshots.
+  a 12-second cap per request split into stages (the primary gets at most 7s, the fallback gets the rest), an
+  in-memory cache, and an optional **fallback on a different provider** (Groq in our setup). Gemini also reads screenshots. Optional Tesseract OCR for screenshots.
 - **Frontend:** a single static page (vanilla HTML/CSS/JS, no build step), mobile-first, served by FastAPI. It shows
   the rules result instantly, then updates it in place when the AI answers. Hindi, Marathi, screen-reader and
   keyboard support.
@@ -187,6 +187,7 @@ Environment variables (values are in `.env.example`; **never commit real keys**)
 | `LLM_FALLBACK_API_KEY` | **secret.** key for the fallback provider |
 | `LLM_FALLBACK_BASE_URL`, `LLM_FALLBACK_MODEL` | fallback provider endpoint and model (text-only) |
 | `LLM_TOTAL_TIMEOUT`, `LLM_TOTAL_TIMEOUT_VISION` | cap on all AI work per request, in seconds (text check / screenshot-only) |
+| `LLM_PRIMARY_TIMEOUT` | most the primary may use while a fallback is waiting (default 7s); the fallback gets the rest of the cap |
 | `LLM_TIMEOUT`, `LLM_MAX_TOKENS` | optional: per-call timeout and reply budget |
 | `CORS_ORIGINS` | allowed origins (`*` by default) |
 
