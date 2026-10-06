@@ -66,15 +66,33 @@ flowchart LR
 
 ## Results
 
-Run `python scripts/eval.py` (rules only) or `python scripts/eval.py --llm`.
+Run `python scripts/eval.py` (rules only) or `python scripts/eval.py --llm` (both, side by side).
 
-| Setup | Scams caught | False alarms on genuine messages |
-|---|---|---|
-| Rules only (14 labelled samples) | 10 / 10 | 0 / 4 |
-| Rules + LLM | *fill in* | *fill in* |
+63 labelled messages in `samples/messages.json`, written for this project and modelled on public advisories:
+35 scams in known scripts (English, Hinglish, Hindi, Marathi), 8 **rules-blind** scams that contain no keyword
+the rules know, and 20 genuine messages.
 
-The genuine set deliberately includes hard negatives: a real HDFC OTP alert ("Do not share OTP"), a
-real SBI warning that mentions AnyDesk, and a real `amazon.in` link.
+| Group | n | Rules only | Rules + LLM |
+|---|---|---|---|
+| Known-script scams (caught) | 35 | 35 / 35 | 35 / 35 |
+| **Rules-blind scams (caught)** | 8 | **0 / 8** | **8 / 8** |
+| All scams (caught) | 43 | 35 / 43 (81%) | 43 / 43 (100%) |
+| Genuine messages (false alarms) | 20 | 0 / 20 | 1 / 20 |
+
+Rules give instant, explainable coverage of known scripts, and the LLM catches the new ones the rules have
+never seen.
+
+How to read this honestly:
+- **The known-script row is in-sample.** I tuned the rules after the first run exposed 12 misses and 2 false
+  alarms on these same samples, so 35/35 shows the fixes worked, not how it generalises. The rules-blind row is
+  the fairer signal, because no rule was added for those messages (and a test keeps them at rule score 0).
+- The genuine set is made of hard negatives: bank OTP and UPI alerts, a delivery OTP that says "share with the
+  agent", college fee notices, a real RBI advisory that names AnyDesk, and real `amazon.in`, `onlinesbi.sbi` and
+  `.gov.in` links.
+- The one remaining false alarm is a friend asking for ₹500 on UPI, which the LLM rates "suspicious". It reads
+  like a family-emergency scam without the pressure, so I left it rather than tune the prompt to one sample.
+- LLM column: `gemini-3.1-flash-lite`, one run, 62 of 63 samples got an AI score (one hit a 503 and fell back to
+  rules). LLM output varies from run to run. A small, author-written set is a smoke test, not a benchmark.
 
 ## Run it locally (Windows / PowerShell)
 
