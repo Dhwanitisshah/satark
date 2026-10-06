@@ -64,8 +64,8 @@ Request flow for `POST /api/check` (multipart: `text`, `image`, `lang` = `en`|`h
 3. `backend/app/llm.py`: optional OpenAI-compatible chat call (Gemini by default, also used for vision; keep the
    code provider-agnostic), configured by `LLM_*` env vars. Rule signals are passed as hints. It returns JSON
    (`risk`, `scam_type`, `red_flags`, `explanation`, `extracted_text`), or `None` if unconfigured. On failure it
-   retries 429/500/503 (2s, 5s), tries `LLM_FALLBACK_MODEL` once, then raises `LLMError(reason)` with `rate_limited`
-   | `unavailable` | `bad_response`. `main.py` catches it, the rules still answer, and the API returns `ai_error`.
+   retries 500/503 once after 2s (never 429), tries `LLM_FALLBACK_MODEL` once if set, all under a 12s total cap
+   (`LLM_TOTAL_TIMEOUT`), then raises `LLMError(reason)` with `rate_limited` | `unavailable` | `bad_response`. `main.py` catches it, the rules still answer, and the API returns `ai_error`.
    Failures are logged with provider, model and status only, never the key or message text.
 4. `backend/app/verdict.py`: `fuse()` combines the two (rule 3 above), drops LLM quotes that aren't in the
    text, builds highlights, and bands the score: scam >= 50, suspicious >= 20, else low.

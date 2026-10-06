@@ -66,24 +66,39 @@ def test_success(wire):
     assert len(calls) == 1 and sleeps == []
 
 
-def test_retries_then_succeeds(wire):
-    replies = iter([httpx.Response(503), httpx.Response(429), chat(json.dumps(GOOD))])
+@pytest.mark.parametrize("status", [500, 503])
+def test_retries_once_then_succeeds(wire, status):
+    replies = iter([httpx.Response(status), chat(json.dumps(GOOD))])
     calls, sleeps = wire(lambda r: next(replies))
     assert run_analyse()["risk"] == 80
-    assert len(calls) == 3 and sleeps == [2.0, 5.0]
+    assert len(calls) == 2 and sleeps == [2.0]
 
 
-def test_rate_limited_after_retries(wire):
+def test_rate_limit_is_not_retried(wire):
     calls, sleeps = wire(lambda r: httpx.Response(429))
     assert failure_reason() == "rate_limited"
-    assert len(calls) == 3 and sleeps == [2.0, 5.0]
+    assert len(calls) == 1 and sleeps == []
 
 
 @pytest.mark.parametrize("status", [500, 503])
-def test_unavailable_after_retries(wire, status):
+def test_unavailable_after_one_retry(wire, status):
     calls, sleeps = wire(lambda r: httpx.Response(status))
     assert failure_reason() == "unavailable"
-    assert len(calls) == 3 and sleeps == [2.0, 5.0]
+    assert len(calls) == 2 and sleeps == [2.0]
+
+
+def test_total_time_is_capped(wire, monkeypatch):
+    async def slow(request):
+        await asyncio.sleep(2)
+        return chat(json.dumps(GOOD))
+
+    monkeypatch.setenv("LLM_TOTAL_TIMEOUT", "0.1")
+    monkeypatch.setattr(llm, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(slow)))
+    assert failure_reason() == "unavailable"
+
+
+def test_default_time_cap_is_about_twelve_seconds():
+    assert llm._total_timeout() == 12.0
 
 
 def test_client_error_is_not_retried(wire):
@@ -152,15 +167,22 @@ def test_fallback_model_used_after_primary_exhausts_retries(wire, monkeypatch):
     monkeypatch.setenv("LLM_FALLBACK_MODEL", "backup-model")
     calls, sleeps = wire(lambda r: httpx.Response(503) if model_of(r) == "test-model" else chat(json.dumps(GOOD)))
     assert run_analyse()["risk"] == 80
-    assert [model_of(c) for c in calls] == ["test-model"] * 3 + ["backup-model"]
-    assert sleeps == [2.0, 5.0]
+    assert [model_of(c) for c in calls] == ["test-model"] * 2 + ["backup-model"]
+    assert sleeps == [2.0]
+
+
+def test_rate_limit_goes_straight_to_fallback(wire, monkeypatch):
+    monkeypatch.setenv("LLM_FALLBACK_MODEL", "backup-model")
+    calls, sleeps = wire(lambda r: httpx.Response(429) if model_of(r) == "test-model" else chat(json.dumps(GOOD)))
+    assert run_analyse()["risk"] == 80
+    assert [model_of(c) for c in calls] == ["test-model", "backup-model"] and sleeps == []
 
 
 def test_fallback_gets_one_attempt_only(wire, monkeypatch):
     monkeypatch.setenv("LLM_FALLBACK_MODEL", "backup-model")
     calls, sleeps = wire(lambda r: httpx.Response(429) if model_of(r) == "test-model" else httpx.Response(503))
     assert failure_reason() == "rate_limited"  # the primary's failure is the one reported
-    assert [model_of(c) for c in calls] == ["test-model"] * 3 + ["backup-model"]
+    assert [model_of(c) for c in calls] == ["test-model", "backup-model"] and sleeps == []
 
 
 def test_fallback_used_when_primary_reply_is_unreadable(wire, monkeypatch):
@@ -181,7 +203,7 @@ def test_fallback_same_as_primary_is_ignored(wire, monkeypatch):
     monkeypatch.setenv("LLM_FALLBACK_MODEL", "test-model")
     calls, _ = wire(lambda r: httpx.Response(503))
     assert failure_reason() == "unavailable"
-    assert len(calls) == 3
+    assert len(calls) == 2
 
 
 # --- through the API -------------------------------------------------------------------------

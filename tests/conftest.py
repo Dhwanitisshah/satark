@@ -11,7 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 os.environ["LLM_API_KEY"] = ""
 
 # Everything else the LLM layer reads from the environment (see .env.example).
-LLM_ENV_VARS = ["LLM_BASE_URL", "LLM_MODEL", "LLM_VISION", "LLM_FALLBACK_MODEL", "LLM_TIMEOUT", "LLM_MAX_TOKENS"]
+LLM_ENV_VARS = ["LLM_BASE_URL", "LLM_MODEL", "LLM_VISION", "LLM_FALLBACK_MODEL", "LLM_TIMEOUT", "LLM_TOTAL_TIMEOUT",
+                "LLM_MAX_TOKENS"]
 
 
 @pytest.fixture(autouse=True)
