@@ -1,4 +1,4 @@
-"""LLM layer — any OpenAI-compatible endpoint (Featherless, Gemini, Groq, OpenRouter, OpenAI...).
+"""LLM layer — any OpenAI-compatible endpoint (Gemini by default; Groq, OpenRouter, OpenAI... also work).
 
 The LLM adds judgement the regexes can't: context, tone, novel scripts and plain-language
 explanations in the user's language. It is never the only thing deciding the verdict.
@@ -19,7 +19,7 @@ log = logging.getLogger("satark.llm")
 
 LANG_NAMES = {"en": "English", "hi": "Hindi (Devanagari)", "mr": "Marathi (Devanagari)"}
 
-DEFAULT_BASE_URL = "https://api.featherless.ai/v1"
+DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"  # Gemini, OpenAI-compatible
 
 # Transient failures worth retrying; the wait before retry n is RETRY_DELAYS[n].
 RETRY_STATUSES = {429, 500, 503}

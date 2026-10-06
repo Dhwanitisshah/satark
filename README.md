@@ -60,7 +60,7 @@ flowchart LR
 ## Tech stack
 
 - **Backend:** Python, FastAPI, httpx
-- **AI:** any OpenAI-compatible chat model (Featherless open-source models via the ForgeHacks perk, or Gemini for screenshot reading). Optional Tesseract OCR for screenshots.
+- **AI:** Gemini through its OpenAI-compatible endpoint (any OpenAI-compatible provider works), with retries and an optional fallback model. The same model reads screenshots. Optional Tesseract OCR for screenshots.
 - **Frontend:** a single static page (vanilla HTML/CSS/JS), mobile-first, served by FastAPI
 - **Tests:** pytest (rule engine + API), a labelled sample set, an eval script
 
@@ -122,9 +122,13 @@ Response (trimmed):
   "highlights": ["YONO account will be blocked", "immediately", "http://sbi-kyc-update.xyz/login"],
   "actions": ["Don't click links, pay, or reply to this message.", "…"],
   "scores": {"rules": 90, "llm": 95},
-  "ai_used": true
+  "ai_used": true,
+  "ai_error": null
 }
 ```
+
+If the AI call fails (after retries and the optional fallback model), the rules still answer and `ai_error` is
+`"rate_limited"`, `"unavailable"` or `"bad_response"`; the UI then shows "AI busy, showing rules-only result".
 
 `GET /api/health` reports whether the LLM, vision and OCR are available.
 

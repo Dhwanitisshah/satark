@@ -12,14 +12,14 @@ Each day below has a goal and a "done when" line. Commit between phases.
 - [ ] Ask in the ForgeHacks Discord what timezone the deadline is in. Screenshot the answer.
 - [ ] **No reuse rule:** don't copy anything from FAKE-NEWS-DETECTOR or any other earlier repo. Open-source libraries (FastAPI, httpx and so on) are fine.
 - [ ] Push this repo **as-is** so its first commit is dated Oct 6. Then commit small and often through Oct 10. The commit history is your proof that everything was built during the event.
-- [ ] Redeem the **Featherless $25 credits** (Discord perks channel). Optionally get a free Gemini key for screenshot reading.
+- [ ] Get a free Gemini API key (aistudio.google.com) and put it in `.env`. It also reads screenshots (`LLM_VISION=true`).
 - [ ] Create the GitHub repo `satark`, push this scaffold as the first commit.
 - [ ] Run locally: `pip install -r requirements.txt`, then `uvicorn app.main:app --reload` from `backend/`. Run `pytest` and `scripts/eval.py`.
 
 **Done when:** the repo is on GitHub, tests pass, and the UI works locally.
 
 ## Wed Oct 7: Make the AI layer good
-- [ ] Add your key to `.env`, run `scripts/eval.py --llm`, and pick the model with the best catch/false-alarm balance (try 2–3 Featherless instruct models).
+- [ ] Add your key to `.env`, run `scripts/eval.py --llm`, and pick the model with the best catch/false-alarm balance (try 2–3 Gemini models, and set `LLM_FALLBACK_MODEL` to one from a different capacity pool).
 - [ ] Grow `samples/messages.json` to **40+** messages: real scam texts from I4C, RBI and PIB Fact Check advisories and news reports, plus **at least 12 genuine** messages (bank OTPs, delivery, UPI receipts, college notices). Hard negatives matter most.
 - [ ] Tune `rules/engine.py` weights for any misses. Add Hinglish phrases you see in real samples.
 - [ ] Check that Hindi and Marathi explanations read naturally; tweak `SYSTEM_PROMPT` if needed.

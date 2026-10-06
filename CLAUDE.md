@@ -61,9 +61,12 @@ Request flow for `POST /api/check` (multipart: `text`, `image`, `lang` = `en`|`h
    shorteners, punycode, raw IP, `.apk`), UPI ID checks, and foreign phone numbers. Each `Signal` has an
    `evidence` string; the score is the sum of weights, capped at 100. Reference lists live in
    `rules/domains.py` (official domains, brand tokens, TLDs, UPI handles).
-3. `backend/app/llm.py`: optional OpenAI-compatible chat call (Featherless by default, Gemini for vision),
-   configured by `LLM_*` env vars. Rule signals are passed as hints. It returns JSON (`risk`, `scam_type`,
-   `red_flags`, `explanation`, `extracted_text`) or `None` on any failure, so rules still answer.
+3. `backend/app/llm.py`: optional OpenAI-compatible chat call (Gemini by default, also used for vision; keep the
+   code provider-agnostic), configured by `LLM_*` env vars. Rule signals are passed as hints. It returns JSON
+   (`risk`, `scam_type`, `red_flags`, `explanation`, `extracted_text`), or `None` if unconfigured. On failure it
+   retries 429/500/503 (2s, 5s), tries `LLM_FALLBACK_MODEL` once, then raises `LLMError(reason)` with `rate_limited`
+   | `unavailable` | `bad_response`. `main.py` catches it, the rules still answer, and the API returns `ai_error`.
+   Failures are logged with provider, model and status only, never the key or message text.
 4. `backend/app/verdict.py`: `fuse()` combines the two (rule 3 above), drops LLM quotes that aren't in the
    text, builds highlights, and bands the score: scam >= 50, suspicious >= 20, else low.
 5. `backend/app/actions.py`: fixed playbook of next steps keyed by signal id and verdict.
