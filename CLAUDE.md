@@ -48,9 +48,19 @@ network, plus a Node check of the page script), README Results filled in.
 Latest eval (`gemini-3.1-flash-lite`): known scripts 35/35, rules-blind 0/8 rules-only -> 8/8 with the LLM,
 false alarms 0/20 rules-only, 1/20 with the LLM (friend asking for Rs 500 on UPI, left alone on purpose).
 
-Not done: the actual Render deploy (needs the user's dashboard steps), smoke test and screenshot test against the
-live URL, live link in the README, translated "what to do now" steps (still a fixed English playbook), native-speaker
-review of the hi/mr strings, demo video, Devpost text.
+Deployed: https://satark-1tnt.onrender.com (Render free web service `satark`, id `srv-db2j76qj9qps73ehj1l0`; smoke
+test 4/4 and a live Hindi screenshot check passed on 2026-10-06). The service was created by hand, not via the
+Blueprint, so its dashboard settings must match `render.yaml`: Root Directory `backend`, build
+`pip install -r ../requirements.txt`, start `uvicorn app.main:app --host 0.0.0.0 --port $PORT`, health check
+`/api/health`. Gotchas: with a Root Directory set, Render only auto-deploys on changes under `backend/`, and
+`frontend/` and `requirements.txt` are outside it, so a push touching only those does NOT deploy unless the
+service's Build Filter lists them (`backend/**`, `frontend/**`, `requirements.txt`; `render.yaml` has it, but the
+dashboard service must be set by hand). Otherwise trigger a deploy through the Render MCP. `PYTHON_VERSION` was not applied, so it runs on Python 3.14.3 (works). `.mcp.json` holds
+the Render API key and is gitignored; never commit it.
+
+Not done: translated "what to do now" steps (still a fixed English playbook), native-speaker review of the hi/mr
+strings, demo video, Devpost text, a per-attempt time budget (a slow primary can eat the whole 12s cap so the
+fallback never runs; seen once live).
 
 Samples: `rules_blind: true` marks scams with no keyword the rules know. They exist to show what the LLM adds, so
 **never add regexes to make them pass**; a test keeps their rule score at 0. The known-script results are in-sample

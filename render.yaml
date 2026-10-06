@@ -10,6 +10,13 @@ services:
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     autoDeploy: true
+    # With rootDir set, Render only redeploys for changes under backend/. The UI (frontend/) and the
+    # requirements file live outside it, so list them or a push that only edits them never deploys.
+    buildFilter:
+      paths:
+        - backend/**
+        - frontend/**
+        - requirements.txt
     envVars:
       # --- secrets: enter these in the Render dashboard ---
       - key: LLM_API_KEY
