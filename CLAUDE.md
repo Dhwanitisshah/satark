@@ -41,11 +41,17 @@ The day-by-day plan, demo script and submission checklist are in [PLAN.md](PLAN.
 
 ## Status
 
-Done: rules-only pipeline, FastAPI API, static UI, 26 passing tests, eval script (10/10 scams caught,
-0/4 false alarms on the 14 samples).
+Done: rules pipeline, FastAPI API, static UI, Gemini LLM layer (retry, fallback, 12s cap, LRU cache), 139
+passing tests (no network), 63-sample set, eval with per-group columns, README Results filled in.
+Latest eval (`gemini-3.1-flash-lite`): known scripts 35/35, rules-blind 0/8 rules-only -> 8/8 with the LLM,
+false alarms 0/20 rules-only, 1/20 with the LLM (friend asking for Rs 500 on UPI, left alone on purpose).
 
-Not done: real LLM run, bigger sample set (target 40+, at least 12 genuine), screenshot input in
-deployment, deployment, Hindi/Marathi polish, demo video, Devpost text.
+Not done: screenshot input tested on a deployment, deployment, Hindi/Marathi explanation polish, UI polish,
+demo video, Devpost text.
+
+Samples: `rules_blind: true` marks scams with no keyword the rules know. They exist to show what the LLM adds, so
+**never add regexes to make them pass**; a test keeps their rule score at 0. The known-script results are in-sample
+(rules were tuned on them), so quote the rules-blind row when asked how well it generalises.
 
 ## Architecture
 
@@ -66,7 +72,10 @@ Request flow for `POST /api/check` (multipart: `text`, `image`, `lang` = `en`|`h
    (`risk`, `scam_type`, `red_flags`, `explanation`, `extracted_text`), or `None` if unconfigured. On failure it
    retries 500/503 once after 2s (never 429), tries `LLM_FALLBACK_MODEL` once if set, all under a 12s total cap
    (`LLM_TOTAL_TIMEOUT`), then raises `LLMError(reason)` with `rate_limited` | `unavailable` | `bad_response`. `main.py` catches it, the rules still answer, and the API returns `ai_error`.
-   Failures are logged with provider, model and status only, never the key or message text.
+   Failures are logged with provider, model and status only, never the key or message text. Successful judgements
+   are cached in memory (LRU, 256 entries, keyed on text hash + image hash + lang + model; failures never cached).
+   Tests clear every `LLM_*` var and the cache (`tests/conftest.py`), so `.env` can't leak in and pytest never
+   calls a real provider.
 4. `backend/app/verdict.py`: `fuse()` combines the two (rule 3 above), drops LLM quotes that aren't in the
    text, builds highlights, and bands the score: scam >= 50, suspicious >= 20, else low.
 5. `backend/app/actions.py`: fixed playbook of next steps keyed by signal id and verdict.
@@ -76,7 +85,9 @@ Other directories:
 - `frontend/index.html`: single-file vanilla HTML/CSS/JS UI (sample chips, language select, highlighted
   message, flags, steps). Set `window.SATARK_API` to point it at another origin.
 - `samples/messages.json`: labelled messages (`id`, `label`, `expected`, `text`). Used by the tests and the eval.
-- `scripts/eval.py`: catch-rate / false-alarm table (`--llm` to include the LLM).
+- `scripts/eval.py`: per-sample table plus grouped summary (all / known scripts / rules-blind / genuine); `--llm`
+  adds rules+LLM side by side and an AI-scored count, `--delay N` paces calls (default 4s). For measurement runs
+  set `LLM_TOTAL_TIMEOUT=30` so the 12s UI cap doesn't distort results.
   `scripts/smoke_test.ps1`: end-to-end check against a running server (`-Base <url>`).
 - `tests/`: pytest. `test_rules.py` runs every sample and checks the evidence guard; `test_api.py` uses
   `TestClient` and monkeypatches `llm.analyse` to test fusion. `conftest.py` puts `backend/` on `sys.path`.
