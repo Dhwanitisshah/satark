@@ -101,6 +101,27 @@ def test_default_time_cap_is_about_twelve_seconds():
     assert llm._total_timeout() == 12.0
 
 
+def test_reading_a_screenshot_gets_a_longer_cap_than_a_text_check(monkeypatch):
+    assert llm._total_timeout(reading_image=True) == 18.0   # below the UI's 20s abort
+    assert llm._total_timeout(reading_image=True) > llm._total_timeout()
+    monkeypatch.setenv("LLM_TOTAL_TIMEOUT_VISION", "25")
+    assert llm._total_timeout(reading_image=True) == 25.0
+
+
+def test_slow_screenshot_read_survives_the_text_cap_but_a_slow_text_check_does_not(wire, monkeypatch):
+    async def slow(request):
+        await asyncio.sleep(0.3)
+        return chat(json.dumps(GOOD))
+
+    monkeypatch.setattr(llm, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(slow)))
+    monkeypatch.setenv("LLM_VISION", "true")
+    monkeypatch.setenv("LLM_TOTAL_TIMEOUT", "0.1")
+    monkeypatch.setenv("LLM_TOTAL_TIMEOUT_VISION", "5")
+    assert asyncio.run(llm.analyse("", "en", [], b"fake-png"))["risk"] == 80   # image only: long cap
+    with pytest.raises(llm.LLMError):
+        asyncio.run(llm.analyse(MESSAGE + " (text only)", "en", []))           # text: short cap
+
+
 def test_client_error_is_not_retried(wire):
     calls, sleeps = wire(lambda r: httpx.Response(401))
     assert failure_reason() == "unavailable"

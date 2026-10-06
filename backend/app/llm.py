@@ -31,8 +31,13 @@ RETRY_STATUSES = {500, 503}
 RETRY_DELAYS = (2.0,)  # the wait before retry n is RETRY_DELAYS[n]
 
 
-def _total_timeout() -> float:
-    """Cap on all LLM work for one request (retries and fallback included), so the UI never hangs."""
+def _total_timeout(reading_image: bool = False) -> float:
+    """Cap on all LLM work for one request (retries and fallback included), so the UI never hangs.
+
+    A screenshot-only request has no instant rules result to show while it waits, and reading an image takes
+    longer, so it gets a longer cap (kept under the UI's own 20s abort)."""
+    if reading_image:
+        return float(os.getenv("LLM_TOTAL_TIMEOUT_VISION", "18"))
     return float(os.getenv("LLM_TOTAL_TIMEOUT", "12"))
 
 SYSTEM_PROMPT = """You are Satark, a fraud analyst protecting ordinary people in India from scams \
@@ -284,11 +289,12 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
                                     provider_label(plan[i + 1].base), plan[i + 1].model, e.reason)
         raise first_error  # the primary model's failure is the one worth reporting
 
+    limit = _total_timeout(reading_image=sees_image and not text.strip())
     try:
-        result = await asyncio.wait_for(run(), timeout=_total_timeout())
+        result = await asyncio.wait_for(run(), timeout=limit)
     except asyncio.TimeoutError:
         log.warning("LLM call failed: provider=%s model=%s status=- error=total_timeout limit=%ss",
-                    provider_label(plan[0].base), plan[0].model, _total_timeout())
+                    provider_label(plan[0].base), plan[0].model, limit)
         raise LLMError("unavailable") from None
 
     _cache[key] = copy.deepcopy(result)  # failures are never cached

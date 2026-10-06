@@ -179,7 +179,7 @@ Environment variables (values are in `.env.example`; **never commit real keys**)
 | `LLM_VISION` | `true` so the model can read screenshots (there is no Tesseract on Render) |
 | `LLM_FALLBACK_API_KEY` | **secret.** key for the fallback provider |
 | `LLM_FALLBACK_BASE_URL`, `LLM_FALLBACK_MODEL` | fallback provider endpoint and model (text-only) |
-| `LLM_TOTAL_TIMEOUT` | cap on all AI work per request, in seconds |
+| `LLM_TOTAL_TIMEOUT`, `LLM_TOTAL_TIMEOUT_VISION` | cap on all AI work per request, in seconds (text check / screenshot-only) |
 | `LLM_TIMEOUT`, `LLM_MAX_TOKENS` | optional: per-call timeout and reply budget |
 | `CORS_ORIGINS` | allowed origins (`*` by default) |
 
