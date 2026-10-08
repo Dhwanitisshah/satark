@@ -1,6 +1,8 @@
 """Fuse rule signals and LLM judgement into one verdict the user can act on."""
 from __future__ import annotations
 
+import re
+
 from .actions import build_actions
 from .rules.translations import localize_signal
 
@@ -30,6 +32,22 @@ _LANG_INDEX = {"hi": 0, "mr": 1}
 def translate(text: str, lang: str) -> str:
     pair = TRANSLATIONS.get(text)
     return pair[_LANG_INDEX[lang]] if pair and lang in _LANG_INDEX else text
+
+
+def tidy_scam_type(label: object) -> str | None:
+    """The AI is asked for a short human-readable label, but a model sometimes answers with an identifier such as
+    'impersonated_relative_emergency'. That is never shown raw: underscores become spaces (and an all-lowercase
+    label gets a capital), and an empty, placeholder or absurdly long label is dropped."""
+    if not isinstance(label, str):
+        return None
+    text = label.strip()
+    if not text or text.lower() in {"none", "null", "n/a", "na", "unknown"} or len(text) > 60:
+        return None
+    if "_" in text:
+        text = re.sub(r"[_\s]+", " ", text).strip()
+        if text.islower():
+            text = text[0].upper() + text[1:]
+    return text
 
 
 def band(score: int) -> str:
@@ -69,8 +87,8 @@ def fuse(text: str, rules: dict, llm: dict | None, ai_error: str | None = None, 
     highlights = [s["evidence"] for s in signals if s.get("evidence")]
     highlights += [f["quote"] for f in llm_flags]
 
-    scam_type = (llm or {}).get("scam_type") or None
-    if (not scam_type or scam_type == "none") and signals:
+    scam_type = tidy_scam_type((llm or {}).get("scam_type"))
+    if not scam_type and signals:
         scam_type = signals[0]["label"]
     if verdict == "low":
         scam_type = None

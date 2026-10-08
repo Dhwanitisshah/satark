@@ -54,3 +54,24 @@ def test_llm_can_raise_risk(monkeypatch):
     monkeypatch.setattr(llm, "analyse", fake)
     body = client.post("/api/check", data={"text": "Darling, I'm stuck at the airport, buy me a gift card"}).json()
     assert body["verdict"] == "scam" and body["scam_type"] == "Romance scam"
+
+
+def test_scam_type_is_never_shown_as_an_identifier():
+    from app.verdict import tidy_scam_type
+    assert tidy_scam_type("impersonated_relative_emergency") == "Impersonated relative emergency"
+    assert tidy_scam_type("fake_KYC_scam") == "fake KYC scam"      # mixed case: only the underscores change
+    assert tidy_scam_type("Romance scam") == "Romance scam"
+    assert tidy_scam_type("पारिवारिक आपातकाल") == "पारिवारिक आपातकाल"
+    for hidden in ("none", "None", "", "  ", "n/a", "unknown", "x" * 61, None, 7):
+        assert tidy_scam_type(hidden) is None, hidden
+
+
+def test_fuse_prettifies_an_identifier_scam_type_and_falls_back_to_the_rule_label():
+    from app.verdict import fuse
+    from app.rules.engine import run_rules
+    text = "Papa this is my new number, send Rs 15000 urgently to rahul.k99@ybl, don't tell mummy"
+    rules = run_rules(text)
+    out = fuse(text, rules, {"risk": 95, "scam_type": "impersonated_relative_emergency", "red_flags": [], "explanation": "e"})
+    assert out["scam_type"] == "Impersonated relative emergency"
+    out = fuse(text, rules, {"risk": 95, "scam_type": "none", "red_flags": [], "explanation": "e"})
+    assert out["scam_type"] == rules["signals"][0]["label"]

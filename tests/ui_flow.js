@@ -170,6 +170,13 @@ const tick = () => new Promise(r => setTimeout(r, 5));
     check("banner also shows while the first check is waiting on a sleeping server", e.els["wake"].hidden === false);
     wakeUp(); await done;
     check("and hides when the result arrives", e.els["wake"].hidden === true && e.els["risk"].textContent === 82); }
+  // 11b. A snake_case scam_type from the server is never shown raw
+  { const e = makeEnv(async (u, o) => res({ ...(o.body.get("ai") === "false" ? stage1 : stage2), scam_type: "impersonated_relative_emergency" }));
+    e.els["text"].value = "m"; await e.submit();
+    check("snake_case scam type is shown as words", e.els["type"].textContent === "Impersonated relative emergency");
+    const e2 = makeEnv(async (u, o) => res({ ...(o.body.get("ai") === "false" ? stage1 : stage2), scam_type: "Romance scam" }));
+    e2.els["text"].value = "m"; await e2.submit();
+    check("a normal label is left alone", e2.els["type"].textContent === "Romance scam"); }
   // 12. Web Share Target: /?title=&text=&url= pre-fills the box and runs the check
   { const seen = [];
     const e = makeEnv(async (u, o) => { seen.push([o.body.get("ai"), o.body.get("text")]); return res(o.body.get("ai") === "false" ? stage1 : stage2); }, undefined,

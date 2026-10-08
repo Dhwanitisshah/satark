@@ -315,12 +315,19 @@ function highlight(text, phrases) {
 // Screen readers hear one short summary instead of the whole card being re-read on every update.
 const announce = msg => { $("announce").textContent = ""; $("announce").textContent = msg; };
 
+// The server already tidies scam_type; this keeps an identifier like "fake_kyc" from ever showing raw.
+const tidyType = s => {
+  s = (s || "").trim();
+  if (s.includes("_")) { s = s.replace(/[_\s]+/g, " ").trim(); if (s === s.toLowerCase()) s = s.charAt(0).toUpperCase() + s.slice(1); }
+  return s;
+};
+
 function render(d) {
   lastResult = d;
   const v = $("verdict");
   v.className = "verdict " + d.verdict;
   $("headline").textContent = t("headline_" + d.verdict);
-  $("type").textContent = d.scam_type || "";
+  $("type").textContent = tidyType(d.scam_type);
   $("gauge").style.setProperty("--v", d.risk);
   $("gauge").setAttribute("aria-label", t("risk", { n: d.risk }));
   $("risk").textContent = d.risk;
