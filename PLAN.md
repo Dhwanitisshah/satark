@@ -97,12 +97,13 @@ the verdicts should not.
 | 2 | 1:10–1:30 | Click **KYC SMS** | **scam** | 93 (90 / 95) | the look-alike link `sbi-kyc-update.xyz`; the badge "AI agrees" or a small rise |
 | 3 | 1:30–1:50 | Pick **हिंदी**, then click **Family emergency** (warm it in Hindi too) | **scam** | 93 (90 / 95) | Hindi headline "यह संदेश धोखाधड़ी लगता है", Hindi steps; 1930 and cybercrime.gov.in stay as written |
 | 4 | 1:50–2:10 | Add `samples/screenshots/family-hindi-whatsapp.png`, press Check | **scam** | 83 (65 / 95), read by Gemini | the Hindi text it read out of the picture, highlighted |
-| 5 | +0:20 (new) | Paste the "Mama it's me…" message from the README tour | **scam** | 57 (0 / 95) | first "No common scam signs found" (rules score 0), then "AI raised risk: 0 → 57" |
+| 5 | +0:20 (new) | Paste the "Mama it's me…" message (`blind-voice-clone-mama`, from the README tour) | **scam** | 57 (0 / 95) | first "No common scam signs found" (rules score 0), then "AI raised risk: 0 → 57" |
 | 6 | 2:10–2:30 | Click **Real bank OTP** | **low** | 3 (0 / 5) | it does not cry wolf; the "do not share OTP" warning isn't flagged |
 | 7 | 2:30–3:15 | Show `docs/results.png`, then `docs/architecture.png` | n/a | n/a | rules-blind 0/8 → 8/8; the AI can raise a score, never lower a rule hit |
 
-Scene 5 adds about 20 seconds to the script above. Its margin is thin on purpose to be honest about: the rules-blind scams
-land at 51–57, just over the 50 "scam" line, so say "flagged as a scam", not "100%".
+Scene 5 adds about 20 seconds to the script above. Use this sample because it has the best margin of the eight rules-blind
+scams: its AI score is 95 and it finishes at **57** in both eval runs on 2026-10-08 and in the live check, seven
+points over the 50 "scam" line. Some of the others finish at 51, so avoid them on camera. Say "flagged as a scam", not "100%".
 
 ## Submission checklist (from the ForgeHacks rules)
 - [ ] Title + short description (problem + solution)

@@ -52,6 +52,15 @@ Latest `--llm` eval with production caps (2026-10-06): 63/63 AI-scored (Gemini 2
 budget), 43/43 scams, 8/8 rules-blind, 0/20 false alarms. Gemini flash-lite is often slower than 7s; Groq is
 faster but limited to ~8k tokens/min, so consider which should be primary if traffic grows.
 
+Latest `--llm` eval, exact production config (2026-10-08; Groq primary, Gemini 3.5 flash-lite fallback, default 12s/7s caps,
+`--delay 12`; pass `LLM_FALLBACK_MODEL=gemini-3.5-flash-lite` because the local `.env` still names 3.1): 63/63 AI-scored
+(Groq 61, Gemini 2), 43/43 scams, 8/8 rules-blind, 0/20 false alarms. Rules-blind scams land at 51-57 (only just over the
+50 line; `blind-voice-clone-mama` is 57 every time, so it is the demo sample). With Gemini answering every check the
+friend-Rs 500 message is flagged (1/20). **Eval guard for any prompt change:** keep it only if 43/43, 8/8 and 0/20 hold
+with Groq answering. A prompt asking for translated per-quote reasons and a human-readable `scam_type` failed it (a
+genuine electricity-bill SMS scored 95 -> scam) and was reverted (`git revert 968363c`); the `scam_type` display fallback
+(`verdict.tidy_scam_type`, plus the page) stayed. Do not change the 50/20 thresholds to improve a number.
+
 Live latency (2026-10-07, `scripts/measure_live.py`, Groq primary + Gemini 3.5 fallback, stopgap timeouts removed):
 text median 1.05s / worst 2.0s (Groq 10/10); screenshots median 7.6s / worst 10.0s (Gemini 3/3); 0 of 13 without AI.
 Before the shared client and Gemini 3.5: screenshots 16.0s median / 18.6s worst, one failed. The public API hides
@@ -146,7 +155,7 @@ Request flow for `POST /api/check` (multipart: `text`, `image`, `lang` = `en`|`h
 Other directories:
 - `frontend/index.html`: single-file vanilla HTML/CSS/JS UI, no build step. Two-stage flow (`ai=false` first, then
   `ai=true` updates the card in place, 20s abort, stale-response token), hi/mr strings in `I18N` (headline, section
-  titles, page text; advice steps stay English), screenshot preview, "Waking up the server..." banner, a live region
+  titles, page text; the advice steps and rule-based red flags come translated from the server), screenshot preview, "Waking up the server..." banner, a live region
   for screen readers. Set `window.SATARK_API` to point it at another origin. Keep it dependency-free.
 - `render.yaml`: Render Blueprint (free web service, root `backend/`). `requirements.txt` is runtime only;
   `requirements-dev.txt` adds pytest and Pillow.
