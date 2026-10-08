@@ -37,18 +37,36 @@ digital-payment users, and the family members who get forwarded these messages t
 
 ```mermaid
 flowchart LR
-    U[User: pasted text or screenshot] --> API[FastAPI /api/check]
-    API -->|screenshot| OCR{Read image}
-    OCR -->|Tesseract OCR| T[Message text]
-    OCR -->|or vision LLM| T
-    API -->|text| T
-    T --> R[Rule engine<br/>~20 Indian scam patterns<br/>link, UPI ID, phone checks]
-    T --> L[LLM judgement<br/>OpenAI-compatible API<br/>JSON: risk, red flags, explanation]
-    R -- signals as hints --> L
-    R --> F[Fusion<br/>rules can't be talked down<br/>LLM quotes verified against text]
-    L --> F
-    F --> A[Action playbook<br/>deterministic next steps<br/>1930 / cybercrime.gov.in / Chakshu]
-    A --> UI[Result: verdict, risk, highlights,<br/>red flags, what to do]
+    subgraph Phone["Phone or browser"]
+        UI["Web page (installable PWA)<br/>paste text, add a screenshot,<br/>or Share from WhatsApp / SMS<br/><br/>Stage 1: ai=false, shown at once<br/>Stage 2: ai=true, updates the card"]
+    end
+    subgraph Server["FastAPI on Render: /api/check"]
+        R["Rule engine<br/>~20 Indian scam patterns<br/>link, UPI ID, phone checks<br/>instant, no AI"]
+        C{"Cache<br/>LRU, 256 entries"}
+        F["Fusion<br/>risk = max(rules, 0.6 x AI + 0.4 x rules)<br/>rules can't be talked down<br/>AI quotes must appear in the text"]
+        A["Playbook (fixed text)<br/>1930, cybercrime.gov.in,<br/>Sanchar Saathi Chakshu"]
+    end
+    subgraph AI["AI providers (free tiers)"]
+        G["Groq, primary<br/>qwen3.8-27b, text only<br/>about 1 second"]
+        M["Gemini 3.5 flash-lite<br/>fallback, and the only<br/>model that reads screenshots"]
+    end
+    UI -->|"text or screenshot"| R
+    R ==>|"Stage 1: rules verdict"| UI
+    R -->|"rule signals as hints"| C
+    C -->|"miss: text"| G
+    C -.->|"miss: screenshot, or Groq 429, error, over 7 s"| M
+    C -->|"hit"| F
+    G --> F
+    M -->|"AI score and the text it read"| F
+    R --> F
+    F --> A
+    A ==>|"Stage 2: verdict, red flags, next steps"| UI
+    classDef det fill:#e6f4ec,stroke:#1f7a4d,color:#1d1b16
+    classDef ai fill:#fff3e8,stroke:#c2410c,color:#1d1b16
+    classDef ui fill:#f6f2ea,stroke:#6b6558,color:#1d1b16
+    class R,F,A det
+    class G,M ai
+    class UI,C ui
 ```
 
 **Two layers, on purpose:**
