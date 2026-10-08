@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Satark — Check a suspicious message</title>
 <meta name="description" content="Paste a suspicious SMS, WhatsApp message or screenshot. Satark tells you if it's a scam, why, and what to do next.">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+<meta name="theme-color" content="#f6f2ea" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15130f" media="(prefers-color-scheme: dark)">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600&family=Noto+Sans+Devanagari:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -424,6 +429,29 @@ $("form").onsubmit = async e => {
 };
 
 applyLang();
+
+// Android "Share" → Satark (the Web Share Target in manifest.json) opens this page as /?title=…&text=…&url=….
+// WhatsApp and SMS put the message in `text`; some apps put a link in `url`, or the message in `title`.
+function sharedMessage(search) {
+  const p = new URLSearchParams(search || "");
+  const get = k => (p.get(k) || "").trim();
+  const text = get("text"), title = get("title"), url = get("url");
+  const parts = [text || title];
+  if (url && !parts[0].includes(url)) parts.push(url);
+  return parts.filter(Boolean).join("\n").slice(0, 5000);   // 5000 = the server's text limit
+}
+const shared = sharedMessage(window.location && window.location.search);
+if (shared) {
+  $("text").value = shared;
+  // Drop the message from the address bar so it isn't kept in history and a refresh doesn't re-send it.
+  if (window.history && window.history.replaceState) window.history.replaceState(null, "", window.location.pathname);
+  $("form").requestSubmit();
+}
+
+// Installable app: the service worker caches only the page shell (see sw.js), never an API response.
+if (typeof navigator !== "undefined" && "serviceWorker" in navigator && window.location && /^https?:$/.test(window.location.protocol)) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+}
 
 // Ping the server as soon as the page opens: this wakes a sleeping host while the person reads and types.
 watch(fetch((window.SATARK_API || "") + "/api/health",
