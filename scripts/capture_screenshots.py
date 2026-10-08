@@ -27,7 +27,8 @@ VIEWS = {"desktop": dict(width=1100, height=900, scale=1, mobile=False),
          "mobile": dict(width=390, height=844, scale=2, mobile=True)}
 SAMPLES = {s["id"]: s for s in json.loads((ROOT / "samples" / "messages.json").read_text(encoding="utf-8"))}
 UPLOAD = ROOT / "samples" / "screenshots" / "family-hindi-whatsapp.png"
-AI_DONE = "document.getElementById('scores').textContent.includes('AI score') && document.getElementById('aiNote').textContent === ''"
+# The AI has answered when the scores line has a second part ("Rule score 0 · AI score 95", in any language) and the note is clear.
+AI_DONE = "document.getElementById('scores').textContent.includes(' · ') && document.getElementById('aiNote').textContent === ''"
 RESULT_UP = "document.getElementById('result').style.display === 'block'"
 # Hold back the AI request by a few seconds so the rules-only first stage can be photographed.
 DELAY_AI = """(() => { const f = window.fetch.bind(window); window.fetch = (u, o) =>

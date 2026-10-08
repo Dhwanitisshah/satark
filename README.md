@@ -28,7 +28,8 @@ Paste a suspicious SMS, WhatsApp message or call script (or upload a screenshot)
    The rules score it **0**, then the AI raises it and it becomes a scam (a badge reads, for example, "AI raised risk: 0 → 57").
 4. Add a **screenshot** instead of text: try [samples/screenshots/family-hindi-whatsapp.png](samples/screenshots/family-hindi-whatsapp.png)
    (a Hindi WhatsApp "papa, send money" message). Satark reads it and checks it.
-5. Switch the language to **हिंदी** or **मराठी** for the page text and the AI's explanation.
+5. Switch the language to **हिंदी** or **मराठी**: the page, headline, red flags, the "what to do now" steps and the AI's
+   explanation all change language (1930, cybercrime.gov.in, OTP, UPI and PIN stay as written).
 6. On Android, install it and use **Share → Satark** from WhatsApp ([how](#install-it-and-share-messages-straight-to-it-android)).
 
 ## What it looks like
@@ -41,7 +42,11 @@ Captured from the live site, real AI answers. Phone-width versions are in [docs/
 
 Before and after the AI answers on the middle case: [rules only](docs/screenshots/desktop-rules-blind-1-rules-only.png)
 (0, "No common scam signs found") → [with the AI](docs/screenshots/desktop-rules-blind-2-ai-raised-risk.png) (scam, risk 57).
-The upload example is a generated test image of a WhatsApp chat. <!-- TODO(hindi): add docs/screenshots/*-hindi.png (python scripts/capture_screenshots.py --hindi) once the Hindi/Marathi playbook is deployed -->
+The upload example is a generated test image of a WhatsApp chat.
+
+**In Hindi** (language set to हिंदी; [desktop](docs/screenshots/desktop-hindi.png), [phone](docs/screenshots/mobile-hindi.png)):
+
+<img src="docs/screenshots/desktop-hindi.png" width="300">
 
 Slides for the video and Devpost: [docs/results.png](docs/results.png) and [docs/architecture.png](docs/architecture.png).
 
@@ -337,9 +342,14 @@ Check a deployment with `pwsh scripts\smoke_test.ps1 -Base https://<your-service
   roughly six checks a minute; beyond that a 429 sends the check to Gemini, which is slower (often 5–10s) and
   returns the occasional 503 or 429. When both are unavailable the rules answer alone, and repeated checks of the
   same message are served from an in-memory cache.
-- **Hindi and Marathi:** the headline, section titles and page text are translated, and the AI writes its
-  explanation in the chosen language. The "what to do now" steps are a fixed English playbook for now. Translations
-  have not been reviewed by a native speaker.
+- **Hindi and Marathi:** the page text, headline, rule-based red flags and the whole "what to do now" playbook are
+  translated, and the AI writes its overall explanation in the chosen language. Names people must recognise stay
+  as written: 1930, cybercrime.gov.in, Sanchar Saathi / Chakshu, OTP, UPI, PIN, KYC. Two gaps: the AI's one-line reason
+  under each *quoted* phrase is still in English (its quotes must stay verbatim, and the prompt only asks for the
+  overall explanation in your language), and the AI's scam-type label is not translated. The translations were
+  written for this project and reviewed by me before release; they have not had an independent native-speaker
+  review. `python scripts/check_translations_live.py` checks a deployment (every step and signal has Devanagari
+  text, the names above survive, evidence is unchanged).
 - **Screenshots** are read by Gemini (the only vision model configured), so they need Gemini to be available.
   Their speed varies a lot (about 2.5s from a laptop, 4.5–10s from Render), and Gemini now and then returns a 503 or
   429, in which case the check says so instead of guessing.
