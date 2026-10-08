@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 ROWS = [
     ("Known-script scams", 35, "35 / 35", "35 / 35", "caught"),
     ("Rules-blind scams", 8, "0 / 8", "8 / 8", "caught"),
-    ("Genuine messages", 20, "0 / 20", "1 / 20", "false alarms"),
+    ("Genuine messages", 20, "0 / 20", "0 / 20", "false alarms"),
 ]
 TOTAL = ("All scams", 43, "35 / 43", "43 / 43")
 OUT = ROOT / "docs" / "results.png"
@@ -67,7 +67,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
   <div class="total"><span>All scams: <b>__TOT_A__</b> (81%) &rarr; <b>__TOT_B__</b> (100%)</span></div>
   <div class="notes">
     <div><b>Known scripts are in-sample</b>: I tuned the rules on them. <b>Rules-blind</b> scams contain no keyword the rules know and no rule was added for them, so that row is the honest measure of generalisation.</div>
-    <div>The 1 false alarm is a friend asking for &#8377;500 on UPI, rated "suspicious" when Gemini answers. With Groq answering, it was 0 / 20. A small, author-written set is a smoke test, not a benchmark.</div>
+    <div><b>0 false alarms with Groq answering.</b> If the Gemini fallback answers instead, it flags one: a friend asking for &#8377;500 on UPI. Production run, 63 of 63 samples AI-scored. A small, author-written set is a smoke test, not a benchmark.</div>
   </div>
   <div class="foot"><span>satark-1tnt.onrender.com</span><span>ForgeHacks 2026 &middot; AI + Cybersecurity</span></div>
 </div></body></html>"""

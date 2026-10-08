@@ -146,7 +146,7 @@ the rules know, and 20 genuine messages.
 | Known-script scams (caught) | 35 | 35 / 35 | 35 / 35 |
 | **Rules-blind scams (caught)** | 8 | **0 / 8** | **8 / 8** |
 | All scams (caught) | 43 | 35 / 43 (81%) | 43 / 43 (100%) |
-| Genuine messages (false alarms) | 20 | 0 / 20 | 1 / 20 |
+| Genuine messages (false alarms) | 20 | 0 / 20 | 0 / 20 |
 
 Rules give instant, explainable coverage of known scripts, and the LLM catches the new ones the rules have
 never seen. (The same table as a slide: [docs/results.png](docs/results.png).)
@@ -158,12 +158,20 @@ How to read this honestly:
 - The genuine set is made of hard negatives: bank OTP and UPI alerts, a delivery OTP that says "share with the
   agent", college fee notices, a real RBI advisory that names AnyDesk, and real `amazon.in`, `onlinesbi.sbi` and
   `.gov.in` links.
-- The one remaining false alarm is a friend asking for ₹500 on UPI, which the LLM rates "suspicious". It reads
-  like a family-emergency scam without the pressure, so I left it rather than tune the prompt to one sample.
-- LLM column (an earlier run, when Gemini `gemini-3.1-flash-lite` was the primary): 62 of 63 samples got an AI score (61 from Gemini, 1 from the Groq fallback
-  after two Gemini 503s, 1 timed out and fell back to rules). LLM output varies from run to run. A small,
+- **The false-alarm cell depends on which model answers.** With Groq answering, which is the normal case, none of the
+  20 genuine messages is flagged. If the Gemini fallback answers instead (when Groq is rate-limited or down), it flags
+  one: a friend asking for ₹500 on UPI, which it scores 51. That message reads like a family-emergency scam without the
+  pressure, so I left it rather than tune the prompt to one sample.
+- **LLM column: the production run of 2026-10-08.** Exactly the deployed setup (Groq `qwen/qwen3.8-27b` primary, Gemini
+  `gemini-3.5-flash-lite` fallback, default 12s / 7s time caps, 12s between samples): **63 of 63 samples got an AI
+  score. Groq answered 61, Gemini answered 2** (after Groq rate limits). Result: 43/43 scams, 8/8 rules-blind, 0/20
+  false alarms. The rules-blind scams land at 51–57, only just over the 50 "scam" line (the AI rates them 85–95, and
+  counts for 60% of the score), so they are caught with a thin margin. LLM output varies from run to run, and a small,
   author-written set is a smoke test, not a benchmark.
-- **With the production time caps and staged budgets** (12s per request, primary limited to 7s): 63 of 63 AI-scored,
+- **A prompt change I rejected.** I asked the AI to write its per-quote reasons and scam-type label in the chosen
+  language. In the same eval, Groq then rated a genuine electricity-bill SMS as a scam (AI score 95, final 57), a
+  false alarm the old prompt never produced, so I reverted the change. Those reasons stay in English for now.
+- **Earlier, on 2026-10-06, with the production time caps and staged budgets** (12s per request, primary limited to 7s): 63 of 63 AI-scored,
   **43/43 scams, 8/8 rules-blind, 0/20 false alarms**. Gemini exceeded its 7s budget on 37 of the 63 samples that
   day, and Groq answered each of them within the same request. Before the staged budgets, a slow Gemini used up the
   whole cap and those checks fell back to rules-only.
@@ -173,8 +181,8 @@ How to read this honestly:
   tokens a minute on Groq's free tier), not quality.
 - **And the other way round?** With Groq deliberately broken so that Gemini (`gemini-3.5-flash-lite`) answered every
   sample: 63 of 63 AI-scored with no failures, **43/43 scams, 8/8 rules-blind, 1/20 false alarms**. The one false alarm
-  is a friend asking for ₹500 on UPI, which Gemini rates as a scam (51) where Groq doesn't. It only matters when
-  Gemini answers a text check, which is when Groq is rate-limited or down.
+  is the friend-₹500 message, which Gemini rates as a scam (51) where Groq doesn't. It only matters when Gemini
+  answers a text check, which is when Groq is rate-limited or down.
 
 ### Live speed
 
@@ -346,16 +354,18 @@ Check a deployment with `pwsh scripts\smoke_test.ps1 -Base https://<your-service
   translated, and the AI writes its overall explanation in the chosen language. Names people must recognise stay
   as written: 1930, cybercrime.gov.in, Sanchar Saathi / Chakshu, OTP, UPI, PIN, KYC. Two gaps: the AI's one-line reason
   under each *quoted* phrase is still in English (its quotes must stay verbatim, and the prompt only asks for the
-  overall explanation in your language), and the AI's scam-type label is not translated. The translations were
+  overall explanation in your language; a prompt change to translate them was tried and rejected, see Results), and the AI's
+  scam-type label is not translated. The translations were
   written for this project and reviewed by me before release; they have not had an independent native-speaker
   review. `python scripts/check_translations_live.py` checks a deployment (every step and signal has Devanagari
   text, the names above survive, evidence is unchanged).
 - **Screenshots** are read by Gemini (the only vision model configured), so they need Gemini to be available.
   Their speed varies a lot (about 2.5s from a laptop, 4.5–10s from Render), and Gemini now and then returns a 503 or
   429, in which case the check says so instead of guessing.
-- **One known false alarm.** A friend asking for ₹500 on UPI gets flagged when Gemini answers (it scored 51; Groq
-  leaves it alone) because it reads like a family-emergency scam without the pressure. I left it rather than tune the prompt to one
-  sample. It only appears when Gemini answers a text check, which is when Groq is rate-limited or down.
+- **One known false alarm, when Gemini answers.** A friend asking for ₹500 on UPI gets flagged by the Gemini fallback
+  (it scored 51); Groq leaves it alone, and with Groq answering, the eval has 0 false alarms in 20. I left it rather
+  than tune the prompt to one sample. It only appears when Gemini answers a text check, which is when Groq is
+  rate-limited or down.
 - **Gemini fallback variance.** Gemini is slower and less steady than Groq, and its scores differ a little from
   Groq's. Rules still answer first and the AI can only raise a score, so a Gemini wobble can't hide a known scam.
 - **Cold start.** Render's free tier sleeps after about 15 minutes idle; the first load can take about a minute.
