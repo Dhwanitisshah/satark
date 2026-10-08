@@ -1020,12 +1020,3 @@ def test_unreadable_screenshot_is_an_error_not_an_all_clear(monkeypatch):
     monkeypatch.setattr(llm, "vision_enabled", lambda: True)
     r = client.post("/api/check", files={"image": ("shot.png", b"\x89PNG fake", "image/png")})
     assert r.status_code == 503
-
-
-def test_prompt_asks_for_label_and_reasons_in_the_requested_language_and_keeps_names_and_quotes():
-    p = llm.SYSTEM_PROMPT
-    assert "human-readable label" in p and "never an identifier with underscores" in p
-    assert 'every red flag\'s "why"' in p and "requested language" in p and "Devanagari" in p
-    for name in ("1930", "OTP", "UPI", "PIN", "KYC", "cybercrime.gov.in"):
-        assert name in p, name
-    assert "never translated" in p and "copied exactly from the message" in p   # quotes must stay verbatim

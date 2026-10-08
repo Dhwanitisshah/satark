@@ -72,17 +72,11 @@ contacts): judge the pattern, not just the keywords. Do not invent facts that ar
 Reply with ONLY a JSON object, no prose, in this exact shape:
 {
   "risk": <integer 0-100>,
-  "scam_type": "<a short human-readable label of 2-4 plain words in the requested language, e.g. 'Fake KYC SMS'; never an identifier with underscores; 'none' if it is not a scam>",
-  "red_flags": [{"quote": "<exact words copied from the message>", "why": "<one short sentence, in the requested language>"}],
+  "scam_type": "<short label or 'none'>",
+  "red_flags": [{"quote": "<exact words copied from the message>", "why": "<one short sentence>"}],
   "explanation": "<2-3 plain sentences a non-technical person understands, in the requested language>",
   "extracted_text": "<if an image was provided, the text in it; otherwise empty>"
-}
-
-Language: write scam_type, every red flag's "why" and the explanation in the requested language (for Hindi or \
-Marathi, use Devanagari script). Keep these exactly as written in Latin letters, never translated or \
-transliterated: 1930, OTP, UPI, PIN, CVV, KYC, QR, APK, SMS, UPI IDs, links, cybercrime.gov.in, and the names of \
-banks, apps and companies. A red flag's "quote" is always copied exactly from the message in its original language \
-and script, never translated. extracted_text is the text exactly as written in the image."""
+}"""
 
 
 class LLMError(Exception):
@@ -448,7 +442,7 @@ async def analyse(text: str, lang: str, rule_hints: list[dict],
 
     hints = ", ".join(h["label"] for h in rule_hints) or "none"
     user_text = (
-        f"Requested language for scam_type, red-flag reasons and explanation: {LANG_NAMES.get(lang, 'English')}.\n"
+        f"Explanation language: {LANG_NAMES.get(lang, 'English')}.\n"
         f"Signals our rule engine already found: {hints}.\n\n"
         f"Message received:\n\"\"\"\n{text or '(see image)'}\n\"\"\""
     )
