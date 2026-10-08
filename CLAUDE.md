@@ -96,7 +96,7 @@ run uvicorn on a spare port with `LLM_API_KEY=` blank for rules-only, and kill o
 `pwsh scripts\smoke_test.ps1` needs `-ExecutionPolicy Bypass` on this machine.
 
 Not done: user review of the translations (then push, update the README Hindi/Marathi limitation, run
-`python scripts/capture_screenshots.py --only otp,kyc --hindi` for the Hindi shot and fill the README TODO(hindi) comment),
+`python scripts/capture_screenshots.py --hindi --only hindi` for the Hindi shot and fill the README TODO(hindi) comment),
 demo video (link placeholder in README and `docs/DEVPOST.md`), submitting on Devpost.
 
 Samples: `rules_blind: true` marks scams with no keyword the rules know. They exist to show what the LLM adds, so
