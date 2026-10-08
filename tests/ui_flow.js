@@ -12,6 +12,8 @@ class El {
     this.classList = { add: c => s.add(c), remove: c => s.delete(c), contains: c => s.has(c) }; this._s = s;
     this.attrs = {}; this.focused = false; this.src = ""; this.alt = ""; this.placeholder = ""; }
   set textContent(v) { this._t = v; } get textContent() { return this._t; }
+  // Like a real <input type=file>: resetting its value to "" also empties the chosen files.
+  set value(v) { this._v = v; if (v === "") this.files = []; } get value() { return this._v; }
   set innerHTML(v) { this._h = v; if (v === "") this.children = []; } get innerHTML() { return this._h || ""; }
   appendChild(c) { this.children.push(c); } scrollIntoView() {} focus() { this.focused = true; }
   requestSubmit() { this.submits = (this.submits || 0) + 1; return this.onsubmit && this.onsubmit({ preventDefault() {} }); }
@@ -139,6 +141,16 @@ const tick = () => new Promise(r => setTimeout(r, 5));
     check("remove hides the preview, frees the blob and clears the input", e.els["preview"].hidden === true && e.revoked.includes("blob:shot.png")
       && e.els["image"].value === "" && !e.els["drop"]._s.has("has"));
     check("remove returns focus to the file input", e.els["image"].focused === true); }
+  // 10b. Choosing a file must keep it in the input, so the next submit actually sends it
+  { const seen = [];
+    const e = makeEnv(async (u, o) => { seen.push([o.body.get("ai"), o.body.get("image") && o.body.get("image").name]); return res(o.body.get("ai") === "false" ? stage1 : stage2); });
+    e.els["image"].files = [{ name: "shot.png" }]; e.els["image"].onchange({ target: e.els["image"] });
+    check("choosing a screenshot keeps it in the file input", e.els["image"].files.length === 1 && e.els["image"].files[0].name === "shot.png");
+    await e.submit();
+    check("the chosen screenshot is sent with the check", seen.length === 1 && seen[0][0] === "true" && seen[0][1] === "shot.png");
+    e.els["image"].files = [{ name: "other.png" }]; e.els["image"].onchange({ target: e.els["image"] });
+    check("choosing a second screenshot replaces the first preview and revokes it", e.els["thumb"].src === "blob:other.png" && e.revoked.includes("blob:shot.png")
+      && e.els["image"].files[0].name === "other.png"); }
   // 11. "Waking up the server…" for a slow (sleeping) host
   { let wakeUp; const asleep = new Promise(r => wakeUp = r);
     const e = makeEnv(async () => res(stage1), () => asleep.then(() => ({ ok: true, json: async () => ({ ok: true }) })));

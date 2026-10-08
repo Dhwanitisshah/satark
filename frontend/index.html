@@ -273,14 +273,17 @@ SAMPLES.forEach(([name, text]) => {
 });
 
 let thumbURL = null;
-function clearImage() {
-  $("image").value = "";
+function resetPreview() {
   if (thumbURL) { URL.revokeObjectURL(thumbURL); thumbURL = null; }
   $("thumb").src = ""; $("preview").hidden = true; $("drop").classList.remove("has");
 }
+function clearImage() {
+  $("image").value = "";   // empties the file list too, so only call this to discard the chosen file
+  resetPreview();
+}
 $("image").onchange = e => {
   const f = e.target.files[0];
-  clearImage();
+  resetPreview();          // not clearImage(): that would empty the input and the chosen file would never be sent
   if (!f) return;
   thumbURL = URL.createObjectURL(f);
   $("thumb").src = thumbURL; $("fileName").textContent = f.name;
