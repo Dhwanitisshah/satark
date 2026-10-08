@@ -143,6 +143,31 @@ Read these numbers with care. They are a small sample on one day, and screenshot
 a screenshot in about 2.5s in a test from a laptop and took 4.5–10s from Render. The text checks were spaced out; a
 burst of more than about 6 checks a minute hits Groq's token limit, and those checks go to Gemini, which is slower.
 
+## Install it and share messages straight to it (Android)
+
+Satark is an installable web app (PWA) with a **Web Share Target**, so a message can go from WhatsApp or SMS into
+Satark in two taps instead of copy and paste.
+
+1. On an Android phone, open https://satark-1tnt.onrender.com in Chrome and choose **⋮ → Install app** (or *Add to
+   Home screen*).
+2. In WhatsApp, Messages or any app, use a message's **Share** action and pick **Satark**. The text is dropped
+   into the box and checked at once: rules first, then the AI update.
+
+No phone to hand? Open `https://satark-1tnt.onrender.com/?text=Your%20SBI%20account%20is%20blocked%2C%20update%20KYC%20at%20http%3A%2F%2Fsbi-kyc.xyz`
+in any browser. That is exactly the address the share sheet opens (`/?title=…&text=…&url=…`), and it fills the box
+and runs the check. Afterwards the message is removed from the address bar, so it isn't kept in history and a
+refresh won't send it again.
+
+What the service worker (`frontend/sw.js`) does and doesn't do: it caches only the page shell (the page, manifest
+and icons), so the installed app opens even on a poor connection. API calls and every non-GET request go straight
+to the network; **no verdict and no message is ever cached** (tests check this). On desktop the site looks and
+behaves exactly as before. I compared the old and new versions: identical API output on all 63 samples, and
+pixel-identical desktop screenshots.
+
+Honest note: the install and share-sheet flow was verified in headless Edge (Chrome reports no installability
+errors, the share URL runs a check, the shell opens offline), not on a physical Android phone. Regenerate the icons
+with `python scripts/make_icons.py`.
+
 ## Run it locally (Windows / PowerShell)
 
 ```powershell
@@ -269,7 +294,7 @@ Check a deployment with `pwsh scripts\smoke_test.ps1 -Base https://<your-service
 
 ## Roadmap
 
-- WhatsApp / Android share-target, so users can forward a message straight to Satark
+- Share target for iPhone (Safari has no Web Share Target; it needs a Shortcut or a native app)
 - Voice-note check for cloned-voice "relative in trouble" calls
 - Community-reported numbers and domains, cross-checked against Chakshu
 - On-device rules-only mode as a lightweight Android app
@@ -286,10 +311,12 @@ backend/app/
   actions.py       deterministic next-step playbook
   ocr.py           optional Tesseract OCR
 frontend/index.html     the whole UI (two-stage result, hi/mr, accessibility)
+frontend/manifest.json  PWA manifest incl. the Web Share Target; sw.js is the service worker; icons/ are generated
 samples/messages.json   63 labelled test messages (35 scams, 8 rules-blind, 20 genuine)
 samples/screenshots/    generated test screenshots
 scripts/eval.py         grouped catch-rate / false-alarm report, rules-only vs rules + LLM
 scripts/make_screenshots.py  renders the test screenshots
+scripts/make_icons.py   renders the PWA icons
 scripts/smoke_test.ps1  end-to-end check against a running server
 tests/                  pytest suite + ui_flow.js (Node check of the page script)
 render.yaml             Render Blueprint
