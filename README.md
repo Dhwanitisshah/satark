@@ -11,17 +11,48 @@ Paste a suspicious SMS, WhatsApp message or call script (or upload a screenshot)
 
 ![Satark result for a fake SBI KYC SMS](docs/screenshots/desktop-kyc.png)
 
-> **Live demo: https://satark-1tnt.onrender.com**
+> **Live demo: https://satark-1tnt.onrender.com**  ·  **Demo video:** _coming soon_ <!-- TODO: paste the YouTube link here once uploaded -->
 >
-> **For judges:** it runs on Render's free tier, which goes to sleep when idle. **The first load may take
-> about a minute** (the page shows "Waking up the server…"); after that it responds normally. Results appear
-> instantly from the rules, and the AI check updates them a moment later.
+> It runs on Render's free tier, which sleeps when idle: **the first load can take about a minute** (the page
+> shows "Waking up the server…"). After that it answers in about a second.
+
+## Try it in 30 seconds
+
+1. Open **https://satark-1tnt.onrender.com** (cold-start note above). Click the **Digital arrest** example. The
+   rules verdict appears at once; a moment later the AI updates the same card.
+2. Click **Real bank OTP**. It stays **low risk**: Satark doesn't cry wolf.
+3. Paste a scam that has no scam keywords, the kind rules can't see:
+   ```
+   Mama it's me. I'm in big trouble, please don't call, my voice is gone from crying. I'm with some people who say I have to do what they tell me or they won't let me leave. Please do exactly what the number I'm messaging from tells you.
+   ```
+   The rules score it **0**, then the AI raises it and it becomes a scam (a badge reads, for example, "AI raised risk: 0 → 57").
+4. Add a **screenshot** instead of text: try [samples/screenshots/family-hindi-whatsapp.png](samples/screenshots/family-hindi-whatsapp.png)
+   (a Hindi WhatsApp "papa, send money" message). Satark reads it and checks it.
+5. Switch the language to **हिंदी** or **मराठी** for the page text and the AI's explanation.
+6. On Android, install it and use **Share → Satark** from WhatsApp ([how](#install-it-and-share-messages-straight-to-it-android)).
+
+## What it looks like
+
+Captured from the live site, real AI answers. Phone-width versions are in [docs/screenshots/](docs/screenshots/).
+
+| Known scam: digital arrest | Rules see nothing, the AI catches it | Genuine bank OTP: stays low | Screenshot in, verdict out |
+|---|---|---|---|
+| <img src="docs/screenshots/desktop-digital-arrest.png" width="230"> | <img src="docs/screenshots/desktop-rules-blind-2-ai-raised-risk.png" width="230"> | <img src="docs/screenshots/desktop-otp.png" width="230"> | <img src="docs/screenshots/desktop-upload.png" width="230"> |
+
+Before and after the AI answers on the middle case: [rules only](docs/screenshots/desktop-rules-blind-1-rules-only.png)
+(0, "No common scam signs found") → [with the AI](docs/screenshots/desktop-rules-blind-2-ai-raised-risk.png) (scam, risk 57).
+The upload example is a generated test image of a WhatsApp chat. <!-- TODO(hindi): add docs/screenshots/*-hindi.png (python scripts/capture_screenshots.py --hindi) once the Hindi/Marathi playbook is deployed -->
+
+Slides for the video and Devpost: [docs/results.png](docs/results.png) and [docs/architecture.png](docs/architecture.png).
 
 ---
 
 ## The problem
 
-Indians lose thousands of crores a year to cyber fraud, and the scripts keep changing:
+Losses that citizens reported on the National Cybercrime Reporting Portal rose from **₹2,290 crore in 2022** to
+**₹7,465 crore in 2023** and **₹22,846 crore in 2024**, about ten times in two years (Ministry of Home Affairs, I4C
+data, [Lok Sabha Unstarred Question 432, answered 2 December 2025](https://www.mha.gov.in/MHA1/Par2017/pdfs/par2025-pdfs/LS02122025/432.pdf)).
+The scripts keep changing:
 "digital arrest" video calls, fake KYC and electricity-cut SMSes, "like videos and earn" task jobs,
 guaranteed-return trading groups, UPI "scan to receive cashback" tricks, banking malware sent as
 `.apk` files, and AI voice clones of relatives asking for urgent money.
@@ -37,18 +68,36 @@ digital-payment users, and the family members who get forwarded these messages t
 
 ```mermaid
 flowchart LR
-    U[User: pasted text or screenshot] --> API[FastAPI /api/check]
-    API -->|screenshot| OCR{Read image}
-    OCR -->|Tesseract OCR| T[Message text]
-    OCR -->|or vision LLM| T
-    API -->|text| T
-    T --> R[Rule engine<br/>~20 Indian scam patterns<br/>link, UPI ID, phone checks]
-    T --> L[LLM judgement<br/>OpenAI-compatible API<br/>JSON: risk, red flags, explanation]
-    R -- signals as hints --> L
-    R --> F[Fusion<br/>rules can't be talked down<br/>LLM quotes verified against text]
-    L --> F
-    F --> A[Action playbook<br/>deterministic next steps<br/>1930 / cybercrime.gov.in / Chakshu]
-    A --> UI[Result: verdict, risk, highlights,<br/>red flags, what to do]
+    subgraph Phone["Phone or browser"]
+        UI["Web page (installable PWA)<br/>paste text, add a screenshot,<br/>or Share from WhatsApp / SMS<br/><br/>Stage 1: ai=false, shown at once<br/>Stage 2: ai=true, updates the card"]
+    end
+    subgraph Server["FastAPI on Render: /api/check"]
+        R["Rule engine<br/>~20 Indian scam patterns<br/>link, UPI ID, phone checks<br/>instant, no AI"]
+        C{"Cache<br/>LRU, 256 entries"}
+        F["Fusion<br/>risk = max(rules, 0.6 x AI + 0.4 x rules)<br/>rules can't be talked down<br/>AI quotes must appear in the text"]
+        A["Playbook (fixed text)<br/>1930, cybercrime.gov.in,<br/>Sanchar Saathi Chakshu"]
+    end
+    subgraph AI["AI providers (free tiers)"]
+        G["Groq, primary<br/>qwen3.8-27b, text only<br/>about 1 second"]
+        M["Gemini 3.5 flash-lite<br/>fallback, and the only<br/>model that reads screenshots"]
+    end
+    UI -->|"text or screenshot"| R
+    R ==>|"Stage 1: rules verdict"| UI
+    R -->|"rule signals as hints"| C
+    C -->|"miss: text"| G
+    C -.->|"miss: screenshot, or Groq 429, error, over 7 s"| M
+    C -->|"hit"| F
+    G --> F
+    M -->|"AI score and the text it read"| F
+    R --> F
+    F --> A
+    A ==>|"Stage 2: verdict, red flags, next steps"| UI
+    classDef det fill:#e6f4ec,stroke:#1f7a4d,color:#1d1b16
+    classDef ai fill:#fff3e8,stroke:#c2410c,color:#1d1b16
+    classDef ui fill:#f6f2ea,stroke:#6b6558,color:#1d1b16
+    class R,F,A det
+    class G,M ai
+    class UI,C ui
 ```
 
 **Two layers, on purpose:**
@@ -73,7 +122,8 @@ flowchart LR
   and an in-memory cache. Optional Tesseract OCR for screenshots.
 - **Frontend:** a single static page (vanilla HTML/CSS/JS, no build step), mobile-first, served by FastAPI. It shows
   the rules result instantly, then updates it in place when the AI answers. Hindi, Marathi, screen-reader and
-  keyboard support.
+  keyboard support. Installable as a PWA with an Android Web Share Target (the service worker caches only the
+  page shell).
 - **Hosting:** Render (free web service) via `render.yaml`
 - **Tests:** pytest (rules, API, LLM failure paths, vision, cache, fallback), a Node check of the page script, a
   labelled sample set, an eval script
@@ -94,7 +144,7 @@ the rules know, and 20 genuine messages.
 | Genuine messages (false alarms) | 20 | 0 / 20 | 1 / 20 |
 
 Rules give instant, explainable coverage of known scripts, and the LLM catches the new ones the rules have
-never seen.
+never seen. (The same table as a slide: [docs/results.png](docs/results.png).)
 
 How to read this honestly:
 - **The known-script row is in-sample.** I tuned the rules after the first run exposed 12 misses and 2 false
@@ -142,6 +192,31 @@ per check cost about 0.3–0.5s here and much more on a throttled free-tier CPU)
 Read these numbers with care. They are a small sample on one day, and screenshot time varies a lot: the same model read
 a screenshot in about 2.5s in a test from a laptop and took 4.5–10s from Render. The text checks were spaced out; a
 burst of more than about 6 checks a minute hits Groq's token limit, and those checks go to Gemini, which is slower.
+
+## Install it and share messages straight to it (Android)
+
+Satark is an installable web app (PWA) with a **Web Share Target**, so a message can go from WhatsApp or SMS into
+Satark in two taps instead of copy and paste.
+
+1. On an Android phone, open https://satark-1tnt.onrender.com in Chrome and choose **⋮ → Install app** (or *Add to
+   Home screen*).
+2. In WhatsApp, Messages or any app, use a message's **Share** action and pick **Satark**. The text is dropped
+   into the box and checked at once: rules first, then the AI update.
+
+No phone to hand? Open `https://satark-1tnt.onrender.com/?text=Your%20SBI%20account%20is%20blocked%2C%20update%20KYC%20at%20http%3A%2F%2Fsbi-kyc.xyz`
+in any browser. That is exactly the address the share sheet opens (`/?title=…&text=…&url=…`), and it fills the box
+and runs the check. Afterwards the message is removed from the address bar, so it isn't kept in history and a
+refresh won't send it again.
+
+What the service worker (`frontend/sw.js`) does and doesn't do: it caches only the page shell (the page, manifest
+and icons), so the installed app opens even on a poor connection. API calls and every non-GET request go straight
+to the network; **no verdict and no message is ever cached** (tests check this). On desktop the site looks and
+behaves exactly as before. I compared the old and new versions: identical API output on all 63 samples, and
+pixel-identical desktop screenshots.
+
+Honest note: the install and share-sheet flow was verified in headless Edge (Chrome reports no installability
+errors, the share URL runs a check, the shell opens offline), not on a physical Android phone. Regenerate the icons
+with `python scripts/make_icons.py`.
 
 ## Run it locally (Windows / PowerShell)
 
@@ -266,10 +341,20 @@ Check a deployment with `pwsh scripts\smoke_test.ps1 -Base https://<your-service
   explanation in the chosen language. The "what to do now" steps are a fixed English playbook for now. Translations
   have not been reviewed by a native speaker.
 - **Screenshots** are read by Gemini (the only vision model configured), so they need Gemini to be available.
+  Their speed varies a lot (about 2.5s from a laptop, 4.5–10s from Render), and Gemini now and then returns a 503 or
+  429, in which case the check says so instead of guessing.
+- **One known false alarm.** A friend asking for ₹500 on UPI gets flagged when Gemini answers (it scored 51; Groq
+  leaves it alone) because it reads like a family-emergency scam without the pressure. I left it rather than tune the prompt to one
+  sample. It only appears when Gemini answers a text check, which is when Groq is rate-limited or down.
+- **Gemini fallback variance.** Gemini is slower and less steady than Groq, and its scores differ a little from
+  Groq's. Rules still answer first and the AI can only raise a score, so a Gemini wobble can't hide a known scam.
+- **Cold start.** Render's free tier sleeps after about 15 minutes idle; the first load can take about a minute.
+- **The Android install and share-sheet flow** was checked in headless Edge, not on a physical phone, and iPhone
+  Safari has no Web Share Target.
 
 ## Roadmap
 
-- WhatsApp / Android share-target, so users can forward a message straight to Satark
+- Share target for iPhone (Safari has no Web Share Target; it needs a Shortcut or a native app)
 - Voice-note check for cloned-voice "relative in trouble" calls
 - Community-reported numbers and domains, cross-checked against Chakshu
 - On-device rules-only mode as a lightweight Android app
@@ -286,10 +371,12 @@ backend/app/
   actions.py       deterministic next-step playbook
   ocr.py           optional Tesseract OCR
 frontend/index.html     the whole UI (two-stage result, hi/mr, accessibility)
+frontend/manifest.json  PWA manifest incl. the Web Share Target; sw.js is the service worker; icons/ are generated
 samples/messages.json   63 labelled test messages (35 scams, 8 rules-blind, 20 genuine)
 samples/screenshots/    generated test screenshots
 scripts/eval.py         grouped catch-rate / false-alarm report, rules-only vs rules + LLM
 scripts/make_screenshots.py  renders the test screenshots
+scripts/make_icons.py   renders the PWA icons
 scripts/smoke_test.ps1  end-to-end check against a running server
 tests/                  pytest suite + ui_flow.js (Node check of the page script)
 render.yaml             Render Blueprint

@@ -12,12 +12,16 @@ class El {
     this.classList = { add: c => s.add(c), remove: c => s.delete(c), contains: c => s.has(c) }; this._s = s;
     this.attrs = {}; this.focused = false; this.src = ""; this.alt = ""; this.placeholder = ""; }
   set textContent(v) { this._t = v; } get textContent() { return this._t; }
+  // Like a real <input type=file>: resetting its value to "" also empties the chosen files.
+  set value(v) { this._v = v; if (v === "") this.files = []; } get value() { return this._v; }
   set innerHTML(v) { this._h = v; if (v === "") this.children = []; } get innerHTML() { return this._h || ""; }
-  appendChild(c) { this.children.push(c); } scrollIntoView() {} requestSubmit() {} focus() { this.focused = true; }
+  appendChild(c) { this.children.push(c); } scrollIntoView() {} focus() { this.focused = true; }
+  requestSubmit() { this.submits = (this.submits || 0) + 1; return this.onsubmit && this.onsubmit({ preventDefault() {} }); }
   setAttribute(k, v) { this.attrs[k] = v; }
 }
 // healthImpl answers GET /api/health (the page pings it on load); everything else goes to fetchImpl.
-function makeEnv(fetchImpl, healthImpl = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })) {
+// opts.search (e.g. "?text=hi") simulates opening the page at that URL, as the Android share sheet does.
+function makeEnv(fetchImpl, healthImpl = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) }), opts = {}) {
   const els = new Proxy({}, { get: (t, id) => (t[id] ||= new El()) });
   const document = { getElementById: id => els[id], createElement: () => new El(), documentElement: { lang: "" } };
   class FormData { constructor() { this.m = {}; } append(k, v) { this.m[k] = v; } get(k) { return this.m[k]; } }
@@ -25,10 +29,17 @@ function makeEnv(fetchImpl, healthImpl = () => Promise.resolve({ ok: true, json:
   const revoked = [];
   const URL = { createObjectURL: f => "blob:" + f.name, revokeObjectURL: u => revoked.push(u) };
   const fetch = (url, o) => (String(url).endsWith("/api/health") ? healthImpl(url) : fetchImpl(url, o));
-  const ctx = { document, FormData, AbortController, AbortSignal: { timeout: () => ({}) }, URL, fetch, setTimeout, clearTimeout,
-                window: { SATARK_WAKE_MS: 40 }, console, Promise };
+  const replaced = [], listeners = {}, registered = [];
+  const window = { SATARK_WAKE_MS: 40, addEventListener: (ev, fn) => { listeners[ev] = fn; } };
+  if (opts.search !== undefined) {
+    window.location = { search: opts.search, pathname: "/", protocol: opts.protocol || "https:" };
+    window.history = { replaceState: (...a) => replaced.push(a[2]) };
+  }
+  const navigator = opts.sw === false ? {} : { serviceWorker: { register: u => { registered.push(u); return Promise.resolve(); } } };
+  const ctx = { document, FormData, AbortController, AbortSignal: { timeout: () => ({}) }, URL, URLSearchParams, fetch, setTimeout, clearTimeout,
+                window, navigator, console, Promise };
   vm.createContext(ctx); vm.runInContext(js, ctx);
-  return { els, ctx, document, revoked, submit: () => els["form"].onsubmit({ preventDefault() {} }) };
+  return { els, ctx, document, revoked, replaced, listeners, registered, submit: () => els["form"].onsubmit({ preventDefault() {} }) };
 }
 const res = (d, ok = true) => Promise.resolve({ ok, json: () => Promise.resolve(d) });
 const base = { verdict: "scam", headline: "H", scam_type: "t", explanation: "e", signals: [], llm_flags: [], highlights: [], actions: [], analysed_text: "msg", ai_error: null };
@@ -130,6 +141,16 @@ const tick = () => new Promise(r => setTimeout(r, 5));
     check("remove hides the preview, frees the blob and clears the input", e.els["preview"].hidden === true && e.revoked.includes("blob:shot.png")
       && e.els["image"].value === "" && !e.els["drop"]._s.has("has"));
     check("remove returns focus to the file input", e.els["image"].focused === true); }
+  // 10b. Choosing a file must keep it in the input, so the next submit actually sends it
+  { const seen = [];
+    const e = makeEnv(async (u, o) => { seen.push([o.body.get("ai"), o.body.get("image") && o.body.get("image").name]); return res(o.body.get("ai") === "false" ? stage1 : stage2); });
+    e.els["image"].files = [{ name: "shot.png" }]; e.els["image"].onchange({ target: e.els["image"] });
+    check("choosing a screenshot keeps it in the file input", e.els["image"].files.length === 1 && e.els["image"].files[0].name === "shot.png");
+    await e.submit();
+    check("the chosen screenshot is sent with the check", seen.length === 1 && seen[0][0] === "true" && seen[0][1] === "shot.png");
+    e.els["image"].files = [{ name: "other.png" }]; e.els["image"].onchange({ target: e.els["image"] });
+    check("choosing a second screenshot replaces the first preview and revokes it", e.els["thumb"].src === "blob:other.png" && e.revoked.includes("blob:shot.png")
+      && e.els["image"].files[0].name === "other.png"); }
   // 11. "Waking up the server…" for a slow (sleeping) host
   { let wakeUp; const asleep = new Promise(r => wakeUp = r);
     const e = makeEnv(async () => res(stage1), () => asleep.then(() => ({ ok: true, json: async () => ({ ok: true }) })));
@@ -149,6 +170,39 @@ const tick = () => new Promise(r => setTimeout(r, 5));
     check("banner also shows while the first check is waiting on a sleeping server", e.els["wake"].hidden === false);
     wakeUp(); await done;
     check("and hides when the result arrives", e.els["wake"].hidden === true && e.els["risk"].textContent === 82); }
+  // 12. Web Share Target: /?title=&text=&url= pre-fills the box and runs the check
+  { const seen = [];
+    const e = makeEnv(async (u, o) => { seen.push([o.body.get("ai"), o.body.get("text")]); return res(o.body.get("ai") === "false" ? stage1 : stage2); }, undefined,
+      { search: "?text=" + encodeURIComponent("Your KYC is blocked, click http://x.xyz") });
+    await tick(); await tick(); await tick(); await tick();
+    check("shared text pre-fills the box", e.els["text"].value === "Your KYC is blocked, click http://x.xyz");
+    check("shared text is checked automatically, rules first then AI", seen.map(s => s[0]).join() === "false,true" && seen[0][1] === "Your KYC is blocked, click http://x.xyz");
+    check("the result is shown", e.els["risk"].textContent === 82);
+    check("the address bar is cleaned so a refresh doesn't re-send it", e.replaced.length === 1 && e.replaced[0] === "/"); }
+  { const e = makeEnv(async () => res(stage1), undefined, { search: "?title=Subject%20line&text=&url=https%3A%2F%2Fbit.ly%2Fabc" });
+    check("empty text falls back to title, and the url is appended", e.els["text"].value === "Subject line\nhttps://bit.ly/abc"); }
+  { const e = makeEnv(async () => res(stage1), undefined, { search: "?text=" + encodeURIComponent("see https://bit.ly/abc now") + "&url=" + encodeURIComponent("https://bit.ly/abc") });
+    check("a url already inside the text isn't duplicated", e.els["text"].value === "see https://bit.ly/abc now"); }
+  { const e = makeEnv(async () => res(stage1), undefined, { search: "?text=" + encodeURIComponent("संदेश: आपका KYC बंद हो जाएगा") });
+    check("Hindi text survives the round trip", e.els["text"].value === "संदेश: आपका KYC बंद हो जाएगा"); }
+  { const e = makeEnv(async () => res(stage1), undefined, { search: "?text=" + "a".repeat(6000) });
+    check("shared text is capped at the server's 5000 characters", e.els["text"].value.length === 5000); }
+  { const e = makeEnv(async () => res(stage1), undefined, { search: "?text=%3Cscript%3Ealert(1)%3C%2Fscript%3E" });
+    check("shared text goes into the box as plain text", e.els["text"].value === "<script>alert(1)</script>" && e.els["result"].style.display !== "block"); }
+  for (const search of ["", "?utm_source=x", "?text=%20%20", "?foo=bar&title=&url="]) {
+    const e = makeEnv(async () => res(stage1), undefined, { search });
+    check(`no shared message (${JSON.stringify(search)}): nothing pre-filled, no automatic check, address bar untouched`,
+      e.els["text"].value === "" && !e.els["form"].submits && e.replaced.length === 0); }
+  { const e = makeEnv(async () => res(stage1));
+    check("opened with no URL information at all (plain stub): no automatic check", !e.els["form"].submits); }
+  // 13. Service worker registration
+  { const e = makeEnv(async () => res(stage1), undefined, { search: "" });
+    check("not registered until the page has loaded", e.registered.length === 0 && typeof e.listeners.load === "function");
+    e.listeners.load(); check("registers /sw.js after load", e.registered.join() === "/sw.js"); }
+  { const e = makeEnv(async () => res(stage1), undefined, { search: "", sw: false });
+    check("no service worker support: nothing registered, page still works", e.registered.length === 0 && !e.listeners.load); }
+  { const e = makeEnv(async () => res(stage1), undefined, { search: "", protocol: "file:" });
+    check("opened from a file: no registration", !e.listeners.load); }
   console.log(failed ? `${failed} FAILED` : "all UI-flow checks passed"); process.exit(failed ? 1 : 0);
 })();
 

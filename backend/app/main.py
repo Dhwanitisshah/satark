@@ -131,3 +131,13 @@ if FRONTEND.exists():
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
         return FileResponse(FRONTEND / "index.html")
+
+    # PWA files. The service worker has to live at the root to control the whole site, and the manifest is
+    # fetched from there too. no-cache makes browsers re-check the worker on every visit, so updates ship.
+    @app.get("/manifest.json", include_in_schema=False)
+    def manifest() -> FileResponse:
+        return FileResponse(FRONTEND / "manifest.json", media_type="application/manifest+json")
+
+    @app.get("/sw.js", include_in_schema=False)
+    def service_worker() -> FileResponse:
+        return FileResponse(FRONTEND / "sw.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
