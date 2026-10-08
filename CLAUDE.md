@@ -77,12 +77,12 @@ wrong (swapped between `LLM_API_KEY` and `LLM_FALLBACK_API_KEY`, or corrupted): 
 (starts `gsk_`). The app keeps one shared keep-alive HTTP client and warms it up at startup; per-request clients cost
 ~225ms of CPU each, which a free-tier instance multiplies. Qwen on Groq does not think by default (~220 tokens).
 
-**Translations are drafted but NOT deployed.** The Hindi/Marathi playbook, headlines and red-flag text are in
-`actions.py`, `verdict.py` and `rules/translations.py`, with the review sheet in `docs/translations_review.md`
-(regenerate with `python scripts/make_translation_review.py`; a test fails if it is stale). They are committed locally
-on `main` but must not be pushed (a push to `backend/` auto-deploys them) until the user says "translations
-approved". Push earlier commits individually (`git push origin <sha>:main`). After approval, update the README's
-Hindi/Marathi limitation (the steps are no longer English-only).
+**Translations are deployed (approved by the user 2026-10-08, pushed with everything else; the push-hold is over).** The
+Hindi/Marathi playbook, headlines and red-flag text are in `actions.py`, `verdict.py` and `rules/translations.py`, with the
+review sheet in `docs/translations_review.md` (regenerate with `python scripts/make_translation_review.py`; a test fails if
+it is stale). `python scripts/check_translations_live.py` checks a deployment (Devanagari everywhere, 1930 /
+cybercrime.gov.in / OTP / UPI kept, evidence verbatim). Known gap, by prompt design: the AI's per-quote `why` and its
+`scam_type` stay English (only `explanation` is requested in the user's language).
 
 Phase 4 (2026-10-08, all pushed): installable PWA with an Android Web Share Target (`frontend/manifest.json`, `sw.js`,
 generated icons via `scripts/make_icons.py`; root routes `/manifest.json` and `/sw.js` in `main.py`; the worker caches only
@@ -95,9 +95,8 @@ emptied the file input (the stub DOM in `ui_flow.js` now behaves like a real fil
 run uvicorn on a spare port with `LLM_API_KEY=` blank for rules-only, and kill only the process you started.
 `pwsh scripts\smoke_test.ps1` needs `-ExecutionPolicy Bypass` on this machine.
 
-Not done: user review of the translations (then push, update the README Hindi/Marathi limitation, run
-`python scripts/capture_screenshots.py --hindi --only hindi` for the Hindi shot and fill the README TODO(hindi) comment),
-demo video (link placeholder in README and `docs/DEVPOST.md`), submitting on Devpost.
+Not done: demo video (link placeholder in README and `docs/DEVPOST.md`), submitting on Devpost. The "Before recording"
+checklist is in PLAN.md.
 
 Samples: `rules_blind: true` marks scams with no keyword the rules know. They exist to show what the LLM adds, so
 **never add regexes to make them pass**; a test keeps their rule score at 0. The known-script results are in-sample

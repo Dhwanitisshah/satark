@@ -63,6 +63,47 @@ Fix anything broken. No new features.
 | 2:30–3:00 | The architecture diagram | Rules + LLM, why the LLM can't overrule hard evidence, and why the advice is deterministic. |
 | 3:00–3:15 | The roadmap slide | WhatsApp share, voice clones, on-device mode. Close on the deployed link. |
 
+## Before recording
+
+Do this in the ten minutes before each take. The cache lives in the server's memory, so it is lost when the free
+server sleeps (about 15 minutes idle) or redeploys. Don't push to `main` between warming and recording.
+
+- [ ] **Warm the server.** Open https://satark-1tnt.onrender.com and wait until the "Waking up the server…" banner is gone,
+  or run `curl.exe -s https://satark-1tnt.onrender.com/api/health` (expect `"llm":true,"vision":true,"fallback":true`).
+- [ ] **Run every demo sample once, exactly as you will on camera.** The cache key is the exact text, the language, the
+  screenshot's bytes and the model, so a different language or a retyped message is a miss. The second run is served
+  from the cache: the AI step takes about a second instead of one to three (a screenshot: about 1s instead of 2.6s here, and
+  5–10s from Render when uncached). The rules result is instant either way.
+- [ ] **Leave the rules-blind scene (#5) un-warmed**, or warm a version with one extra word. A cached answer arrives so fast
+  that the "No common scam signs found" frame and the "AI raised risk: 0 → 57" badge barely show; a fresh call takes
+  about 1.5s, which is the moment you want on video.
+- [ ] **Pace yourself.** Groq's free tier allows about 6 checks a minute. A burst sends checks to Gemini, which is slower and
+  scores a little differently. Leave a few seconds between samples.
+- [ ] **Clean window.** Fresh browser window, light theme, 100% zoom, English selected (except scene 3), text box empty,
+  devtools closed, notifications off.
+- [ ] **Slides ready:** `docs/results.png` and `docs/architecture.png` open full-screen.
+- [ ] **Android share clip (optional).** It has not been tried on a real phone. Rehearse it first and cut it if it fails.
+- [ ] **After uploading:** play the YouTube link logged out, then paste it into the README (the "Demo video" line) and
+  `docs/DEVPOST.md`.
+
+### Demo samples in video order
+
+Measured on the live site on 2026-10-08 (Groq answered unless noted). AI scores move a few points between runs;
+the verdicts should not.
+
+| # | Video time | What to do | Expected verdict | Risk (rules / AI) | What to point at |
+|---|---|---|---|---|---|
+| 1 | 0:45–1:10 | Click the **Digital arrest** example | **scam** | 100 (100 / 100) | highlighted "digital arrest", "do not tell anyone"; steps start with 1930 |
+| 2 | 1:10–1:30 | Click **KYC SMS** | **scam** | 93 (90 / 95) | the look-alike link `sbi-kyc-update.xyz`; the badge "AI agrees" or a small rise |
+| 3 | 1:30–1:50 | Pick **हिंदी**, then click **Family emergency** (warm it in Hindi too) | **scam** | 93 (90 / 95) | Hindi headline "यह संदेश धोखाधड़ी लगता है", Hindi steps; 1930 and cybercrime.gov.in stay as written |
+| 4 | 1:50–2:10 | Add `samples/screenshots/family-hindi-whatsapp.png`, press Check | **scam** | 83 (65 / 95), read by Gemini | the Hindi text it read out of the picture, highlighted |
+| 5 | +0:20 (new) | Paste the "Mama it's me…" message from the README tour | **scam** | 57 (0 / 95) | first "No common scam signs found" (rules score 0), then "AI raised risk: 0 → 57" |
+| 6 | 2:10–2:30 | Click **Real bank OTP** | **low** | 3 (0 / 5) | it does not cry wolf; the "do not share OTP" warning isn't flagged |
+| 7 | 2:30–3:15 | Show `docs/results.png`, then `docs/architecture.png` | n/a | n/a | rules-blind 0/8 → 8/8; the AI can raise a score, never lower a rule hit |
+
+Scene 5 adds about 20 seconds to the script above. Its margin is thin on purpose to be honest about: the rules-blind scams
+land at 51–57, just over the 50 "scam" line, so say "flagged as a scam", not "100%".
+
 ## Submission checklist (from the ForgeHacks rules)
 - [ ] Title + short description (problem + solution)
 - [ ] Track: **AI + Cybersecurity**
