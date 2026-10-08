@@ -43,8 +43,8 @@ The day-by-day plan, demo script and submission checklist are in [PLAN.md](PLAN.
 
 Done: rules pipeline, FastAPI API, two-stage UI (rules first, AI updates in place) with hi/mr strings and
 accessibility, Gemini LLM layer (retry, cross-provider fallback to Groq, 12s cap, LRU cache), screenshot input via
-the vision model (tested with real Gemini), 63-sample set, grouped eval, `render.yaml`, 177 passing tests (no
-network, plus a Node check of the page script), README Results filled in.
+the vision model (tested with real Gemini), 63-sample set, grouped eval, `render.yaml`, 534 passing tests locally (253 on the pushed commits, the rest are the
+translation tests; no network, plus Node checks of the page script and the service worker), README Results filled in.
 Eval with Gemini as primary (`gemini-3.1-flash-lite`, an earlier setup): known scripts 35/35, rules-blind 0/8 rules-only -> 8/8 with the LLM,
 false alarms 0/20 rules-only, 1/20 with the LLM (friend asking for Rs 500 on UPI, left alone on purpose).
 
@@ -84,7 +84,20 @@ on `main` but must not be pushed (a push to `backend/` auto-deploys them) until 
 approved". Push earlier commits individually (`git push origin <sha>:main`). After approval, update the README's
 Hindi/Marathi limitation (the steps are no longer English-only).
 
-Not done: user review of the translations, demo video, Devpost text.
+Phase 4 (2026-10-08, all pushed): installable PWA with an Android Web Share Target (`frontend/manifest.json`, `sw.js`,
+generated icons via `scripts/make_icons.py`; root routes `/manifest.json` and `/sw.js` in `main.py`; the worker caches only
+the page shell, never `/api/`; checked in headless Edge, NOT on a physical phone); live-site screenshots in
+`docs/screenshots/` (`scripts/capture_screenshots.py`, driven by `scripts/cdp.py`, a tiny DevTools driver; `--hindi`
+adds the Hindi shots); `docs/results.png` and `docs/architecture.png` (1920x1080, `scripts/make_results_image.py`,
+`scripts/make_architecture_image.py`; tests keep them in sync with the README table and render.yaml); README judge tour
+with the sourced MHA statistic; `docs/DEVPOST.md`. Fixed a real bug found in a real browser: choosing a screenshot
+emptied the file input (the stub DOM in `ui_flow.js` now behaves like a real file input). Local servers for checks:
+run uvicorn on a spare port with `LLM_API_KEY=` blank for rules-only, and kill only the process you started.
+`pwsh scripts\smoke_test.ps1` needs `-ExecutionPolicy Bypass` on this machine.
+
+Not done: user review of the translations (then push, update the README Hindi/Marathi limitation, run
+`python scripts/capture_screenshots.py --only otp,kyc --hindi` for the Hindi shot and fill the README TODO(hindi) comment),
+demo video (link placeholder in README and `docs/DEVPOST.md`), submitting on Devpost.
 
 Samples: `rules_blind: true` marks scams with no keyword the rules know. They exist to show what the LLM adds, so
 **never add regexes to make them pass**; a test keeps their rule score at 0. The known-script results are in-sample
