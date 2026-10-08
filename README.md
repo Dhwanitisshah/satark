@@ -11,17 +11,48 @@ Paste a suspicious SMS, WhatsApp message or call script (or upload a screenshot)
 
 ![Satark result for a fake SBI KYC SMS](docs/screenshots/desktop-kyc.png)
 
-> **Live demo: https://satark-1tnt.onrender.com**
+> **Live demo: https://satark-1tnt.onrender.com**  ·  **Demo video:** _coming soon_ <!-- TODO: paste the YouTube link here once uploaded -->
 >
-> **For judges:** it runs on Render's free tier, which goes to sleep when idle. **The first load may take
-> about a minute** (the page shows "Waking up the server…"); after that it responds normally. Results appear
-> instantly from the rules, and the AI check updates them a moment later.
+> It runs on Render's free tier, which sleeps when idle: **the first load can take about a minute** (the page
+> shows "Waking up the server…"). After that it answers in about a second.
+
+## Try it in 30 seconds
+
+1. Open **https://satark-1tnt.onrender.com** (cold-start note above). Click the **Digital arrest** example. The
+   rules verdict appears at once; a moment later the AI updates the same card.
+2. Click **Real bank OTP**. It stays **low risk**: Satark doesn't cry wolf.
+3. Paste a scam that has no scam keywords, the kind rules can't see:
+   ```
+   Mama it's me. I'm in big trouble, please don't call, my voice is gone from crying. I'm with some people who say I have to do what they tell me or they won't let me leave. Please do exactly what the number I'm messaging from tells you.
+   ```
+   The rules score it **0**, then the AI raises it and it becomes a scam (a badge reads, for example, "AI raised risk: 0 → 57").
+4. Add a **screenshot** instead of text: try [samples/screenshots/family-hindi-whatsapp.png](samples/screenshots/family-hindi-whatsapp.png)
+   (a Hindi WhatsApp "papa, send money" message). Satark reads it and checks it.
+5. Switch the language to **हिंदी** or **मराठी** for the page text and the AI's explanation.
+6. On Android, install it and use **Share → Satark** from WhatsApp ([how](#install-it-and-share-messages-straight-to-it-android)).
+
+## What it looks like
+
+Captured from the live site, real AI answers. Phone-width versions are in [docs/screenshots/](docs/screenshots/).
+
+| Known scam: digital arrest | Rules see nothing, the AI catches it | Genuine bank OTP: stays low | Screenshot in, verdict out |
+|---|---|---|---|
+| <img src="docs/screenshots/desktop-digital-arrest.png" width="230"> | <img src="docs/screenshots/desktop-rules-blind-2-ai-raised-risk.png" width="230"> | <img src="docs/screenshots/desktop-otp.png" width="230"> | <img src="docs/screenshots/desktop-upload.png" width="230"> |
+
+Before and after the AI answers on the middle case: [rules only](docs/screenshots/desktop-rules-blind-1-rules-only.png)
+(0, "No common scam signs found") → [with the AI](docs/screenshots/desktop-rules-blind-2-ai-raised-risk.png) (scam, risk 57).
+The upload example is a generated test image of a WhatsApp chat. <!-- TODO(hindi): add docs/screenshots/*-hindi.png (python scripts/capture_screenshots.py --hindi) once the Hindi/Marathi playbook is deployed -->
+
+Slides for the video and Devpost: [docs/results.png](docs/results.png) and [docs/architecture.png](docs/architecture.png).
 
 ---
 
 ## The problem
 
-Indians lose thousands of crores a year to cyber fraud, and the scripts keep changing:
+Losses that citizens reported on the National Cybercrime Reporting Portal rose from **₹2,290 crore in 2022** to
+**₹7,465 crore in 2023** and **₹22,846 crore in 2024**, about ten times in two years (Ministry of Home Affairs, I4C
+data, [Lok Sabha Unstarred Question 432, answered 2 December 2025](https://www.mha.gov.in/MHA1/Par2017/pdfs/par2025-pdfs/LS02122025/432.pdf)).
+The scripts keep changing:
 "digital arrest" video calls, fake KYC and electricity-cut SMSes, "like videos and earn" task jobs,
 guaranteed-return trading groups, UPI "scan to receive cashback" tricks, banking malware sent as
 `.apk` files, and AI voice clones of relatives asking for urgent money.
@@ -91,7 +122,8 @@ flowchart LR
   and an in-memory cache. Optional Tesseract OCR for screenshots.
 - **Frontend:** a single static page (vanilla HTML/CSS/JS, no build step), mobile-first, served by FastAPI. It shows
   the rules result instantly, then updates it in place when the AI answers. Hindi, Marathi, screen-reader and
-  keyboard support.
+  keyboard support. Installable as a PWA with an Android Web Share Target (the service worker caches only the
+  page shell).
 - **Hosting:** Render (free web service) via `render.yaml`
 - **Tests:** pytest (rules, API, LLM failure paths, vision, cache, fallback), a Node check of the page script, a
   labelled sample set, an eval script
@@ -112,7 +144,7 @@ the rules know, and 20 genuine messages.
 | Genuine messages (false alarms) | 20 | 0 / 20 | 1 / 20 |
 
 Rules give instant, explainable coverage of known scripts, and the LLM catches the new ones the rules have
-never seen.
+never seen. (The same table as a slide: [docs/results.png](docs/results.png).)
 
 How to read this honestly:
 - **The known-script row is in-sample.** I tuned the rules after the first run exposed 12 misses and 2 false
@@ -309,6 +341,16 @@ Check a deployment with `pwsh scripts\smoke_test.ps1 -Base https://<your-service
   explanation in the chosen language. The "what to do now" steps are a fixed English playbook for now. Translations
   have not been reviewed by a native speaker.
 - **Screenshots** are read by Gemini (the only vision model configured), so they need Gemini to be available.
+  Their speed varies a lot (about 2.5s from a laptop, 4.5–10s from Render), and Gemini now and then returns a 503 or
+  429, in which case the check says so instead of guessing.
+- **One known false alarm.** A friend asking for ₹500 on UPI gets flagged when Gemini answers (it scored 51; Groq
+  leaves it alone) because it reads like a family-emergency scam without the pressure. I left it rather than tune the prompt to one
+  sample. It only appears when Gemini answers a text check, which is when Groq is rate-limited or down.
+- **Gemini fallback variance.** Gemini is slower and less steady than Groq, and its scores differ a little from
+  Groq's. Rules still answer first and the AI can only raise a score, so a Gemini wobble can't hide a known scam.
+- **Cold start.** Render's free tier sleeps after about 15 minutes idle; the first load can take about a minute.
+- **The Android install and share-sheet flow** was checked in headless Edge, not on a physical phone, and iPhone
+  Safari has no Web Share Target.
 
 ## Roadmap
 
